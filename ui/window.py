@@ -69,6 +69,24 @@ HTML = r"""
   .timeline{display:flex;flex-direction:column;gap:5px}
   .tl-item{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;
     background:#1a1820;border-radius:9px;border:0.5px solid rgba(255,255,255,0.05)}
+  @keyframes slideIn {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+  }
+  .tl-item-new { animation: slideIn 0.25s ease; }
+
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(83,74,183,0.4); }
+    70%  { box-shadow: 0 0 0 6px rgba(83,74,183,0); }
+    100% { box-shadow: 0 0 0 0 rgba(83,74,183,0); }
+  }
+  .card-pulse { animation: pulse 0.6s ease; }
+
+  @keyframes fadeUpdate {
+    0%   { background: rgba(83,74,183,0.15); }
+    100% { background: #1a1820; }
+  }
+  .card-updated { animation: fadeUpdate 0.8s ease; }
   .tl-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;margin-top:4px}
   .tl-dot-you{background:#534ab7}.tl-dot-her{background:#d4537e}
   .tl-time{font-size:11px;color:rgba(255,255,255,0.2);min-width:36px;flex-shrink:0}
@@ -108,8 +126,10 @@ HTML = r"""
 <body>
 <div class="titlebar">
   <div class="titlebar-title"><span class="heart">♥</span> Together</div>
-  <!-- Кнопка закрытия скрывает окно через Python API -->
-  <button class="titlebar-close" onclick="pywebview.api.hide_window()">✕</button>
+  <div style="-webkit-app-region:no-drag;display:flex;gap:4px">
+    <button class="titlebar-close" onclick="pywebview.api.minimize_window()" title="Свернуть">—</button>
+    <button class="titlebar-close" onclick="pywebview.api.hide_window()" title="В трей">✕</button>
+  </div>
 </div>
 <div class="content">
   <div class="nav">
@@ -212,41 +232,74 @@ function timeSince(iso){
   return Math.floor(m/60)+' ч '+(m%60)+' мин';
 }
 
-function updateCard(prefix,data,online){
-  document.getElementById(prefix+'-card').classList.toggle('offline-card',!online);
-  document.getElementById(prefix+'-app').textContent=online?(data.app||'—'):'не в сети';
-  document.getElementById(prefix+'-title').textContent=online?(data.title||''):'';
-  document.getElementById(prefix+'-time').textContent=online?timeSince(data.since):'';
-  if(data.name){
-    document.getElementById(prefix+'-avatar').textContent=data.name[0].toUpperCase();
-    document.getElementById(prefix+'-label').textContent=data.name;
+let _prevApp = {my: '', her: ''};
+
+function updateCard(prefix, data, online) {
+  document.getElementById(prefix+'-card').classList.toggle('offline-card', !online);
+  
+  const appEl = document.getElementById(prefix+'-app');
+  const newApp = online ? (data.app||'—') : 'не в сети';
+  
+  // Анимация если приложение сменилось
+  if (newApp !== _prevApp[prefix]) {
+    _prevApp[prefix] = newApp;
+    const card = document.getElementById(prefix+'-card');
+    card.classList.remove('card-updated');
+    void card.offsetWidth; // reflow чтобы анимация перезапустилась
+    card.classList.add('card-updated');
+  }
+
+  appEl.textContent = newApp;
+  document.getElementById(prefix+'-title').textContent = online?(data.title||''):'';
+  document.getElementById(prefix+'-time').textContent = online?timeSince(data.since):'';
+  if (data.name) {
+    document.getElementById(prefix+'-avatar').textContent = data.name[0].toUpperCase();
+    document.getElementById(prefix+'-label').textContent = data.name;
     const colId = prefix==='my' ? 'my-col-title' : 'her-col-title';
     const colEl = document.getElementById(colId);
-    if (colEl && data.name) colEl.textContent = data.name;
+    if (colEl) colEl.textContent = data.name;
   }
-  const cat=data.afk?'idle':(data.category||'other');
-  const badge=document.getElementById(prefix+'-badge');
-  badge.className='badge badge-'+(online?cat:'idle');
-  badge.textContent=!online?'офлайн':(data.afk?'😴 AFK':(BADGES[cat]||cat));
+  const cat = data.afk ? 'idle' : (data.category||'other');
+  const badge = document.getElementById(prefix+'-badge');
+  badge.className = 'badge badge-'+(online?cat:'idle');
+  badge.textContent = !online?'офлайн':(data.afk?'😴 AFK':(BADGES[cat]||cat));
 }
 
+let _prevFirst = { you: '', her: '' };
+
 function updateTimeline(myH, herH) {
-  const renderCol = (items, who) => {
-    if (!items || !items.length) return `
-      <div class="tl-item">
-        <div class="tl-time">—</div>
-        <div class="tl-dot tl-dot-${who}"></div>
-        <div class="tl-app">пусто</div>
-      </div>`;
-    return items.slice(0,8).map(h => `
-      <div class="tl-item">
-        <div class="tl-time">${h.time}</div>
-        <div class="tl-dot tl-dot-${who}"></div>
-        <div class="tl-app">${h.app}${h.title?' — '+h.title:''}</div>
-      </div>`).join('');
+
+  const renderCol = (items, who, prevFirst) => {
+    if (!items || !items.length) {
+      return `
+        <div class="tl-item">
+          <div class="tl-time">—</div>
+          <div class="tl-dot tl-dot-${who}"></div>
+          <div class="tl-app">пусто</div>
+        </div>`;
+    }
+
+    return items.slice(0, 8).map((h, i) => {
+      const isNew = i === 0 && h.app !== prevFirst;
+
+      return `
+        <div class="tl-item${isNew ? ' tl-item-new' : ''}">
+          <div class="tl-time">${h.time}</div>
+          <div class="tl-dot tl-dot-${who}"></div>
+          <div class="tl-app">${h.app}${h.title ? ' — ' + h.title : ''}</div>
+        </div>`;
+    }).join('');
   };
-  document.getElementById('timeline-you').innerHTML = renderCol(myH, 'you');
-  document.getElementById('timeline-her').innerHTML = renderCol(herH, 'her');
+
+  document.getElementById('timeline-you').innerHTML =
+    renderCol(myH, 'you', _prevFirst.you);
+
+  document.getElementById('timeline-her').innerHTML =
+    renderCol(herH, 'her', _prevFirst.her);
+
+  // сохраняем новые первые элементы
+  if (myH?.[0]) _prevFirst.you = myH[0].app;
+  if (herH?.[0]) _prevFirst.her = herH[0].app;
 }
 
 function updateStatus(c){
@@ -367,6 +420,11 @@ class WindowAPI:
         """Скрывает окно — приложение продолжает работать в трее"""
         if _window:
             _window.hide()
+            
+    def minimize_window(self):
+        """Сворачивает окно в панель задач"""
+        if _window:
+            _window.minimize()
 
     def quit_app(self):
         """Полный выход — вызывается из кнопки Выйти в настройках"""
@@ -415,8 +473,22 @@ def run_webview_loop(tracker, network):
         easy_drag=True,
         background_color="#0f0f13",
         hidden=True,
+        on_top=False,
     )
+    def hide_from_taskbar():
+      import ctypes
+      hwnd = ctypes.windll.user32.FindWindowW(None, "Together")
+      if hwnd:
+          # Убираем из панели задач
+          GWL_EXSTYLE = -20
+          WS_EX_TOOLWINDOW = 0x00000080
+          WS_EX_APPWINDOW  = 0x00040000
+          style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+          style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+          ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
 
+    threading.Timer(1.5, hide_from_taskbar).start()
+  
+    
     webview.start(debug=False)
-    # Сюда попадаем после destroy() — финальный выход
     os._exit(0)
