@@ -1,11 +1,13 @@
-# Личные настройки (у каждого свои)
+# Личные настройки
 settings.json
+
+# База данных статистики
+stats.db
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
 
 # PyInstaller
 build/
@@ -15,9 +17,7 @@ dist/
 # Виртуальное окружение
 venv/
 .venv/
-env/
 
 # IDE
 .vscode/
 .idea/
-*.iml

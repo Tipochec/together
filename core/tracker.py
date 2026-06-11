@@ -65,20 +65,8 @@ def _settings_path():
 
 
 def load_settings():
-    path = _settings_path()
-    # Если settings.json нет — создаём из шаблона
-    if not os.path.exists(path):
-        default_path = os.path.join(os.path.dirname(path), "settings.default.json")
-        try:
-            with open(default_path, "r", encoding="utf-8") as f:
-                defaults = json.load(f)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(defaults, f, ensure_ascii=False, indent=2)
-            return defaults
-        except Exception:
-            return {}
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(_settings_path(), "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}

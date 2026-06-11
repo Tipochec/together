@@ -24,7 +24,6 @@ class NetworkManager:
     def __init__(self, tracker):
         self.tracker = tracker
         self.partner_data = None
-        self._partner_last_seen = 0   # timestamp последнего пакета
         self._lock = threading.Lock()
         self._on_partner_update = []
         self._on_status_change = []
@@ -37,15 +36,10 @@ class NetworkManager:
 
     def get_partner_data(self):
         with self._lock:
-            # Если данных нет или они старше 15 секунд — офлайн
-            if not self.partner_data:
-                return None
-            if time.time() - self._partner_last_seen > 15:
-                return None
-            return dict(self.partner_data)
+            return dict(self.partner_data) if self.partner_data else None
 
     def is_connected(self):
-        return self.partner_data is not None and (time.time() - self._partner_last_seen) < 15
+        return self._connected
 
     def start(self):
         self._running = True
@@ -161,6 +155,7 @@ class NetworkManager:
                     "app":   h.get("app","—"),
                     "title": h.get("title",""),
                     "time":  h["timestamp"].strftime("%H:%M") if h.get("timestamp") else "—",
+                    "ts":    h["timestamp"].isoformat() if h.get("timestamp") else "0",
                     "category": h.get("category","other"),
                 }
                 for h in history
@@ -173,7 +168,6 @@ class NetworkManager:
             if data.get("type") == "activity":
                 with self._lock:
                     self.partner_data = data
-                    self._partner_last_seen = time.time()
                 for cb in self._on_partner_update:
                     try: cb(data)
                     except Exception: pass

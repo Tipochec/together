@@ -13,6 +13,7 @@ except ImportError:
 _tracker = None
 _network = None
 _window  = None
+_stats   = None
 
 HTML = r"""
 <!DOCTYPE html>
@@ -27,9 +28,10 @@ HTML = r"""
     -webkit-app-region:drag;border-bottom:0.5px solid rgba(255,255,255,0.06);justify-content:space-between}
   .titlebar-title{font-size:13px;color:rgba(255,255,255,0.4);display:flex;align-items:center;gap:8px}
   .heart{color:#d4537e}
-  .titlebar-close{-webkit-app-region:no-drag;width:28px;height:28px;border-radius:6px;border:none;
-    background:transparent;color:rgba(255,255,255,0.3);cursor:pointer;font-size:16px;
-    display:flex;align-items:center;justify-content:center}
+  .titlebar-btns{-webkit-app-region:no-drag;display:flex;gap:4px}
+  .titlebar-close{width:28px;height:28px;border-radius:6px;border:none;
+    background:transparent;color:rgba(255,255,255,0.3);cursor:pointer;font-size:15px;
+    display:flex;align-items:center;justify-content:center;transition:all .15s}
   .titlebar-close:hover{background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.7)}
   .content{padding:16px;height:calc(100vh - 40px);overflow-y:auto}
   .cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
@@ -62,36 +64,23 @@ HTML = r"""
   .dot-online{background:#1d9e75;box-shadow:0 0 6px #1d9e75}
   .dot-waiting{background:#b87c1a;box-shadow:0 0 6px #b87c1a}
   .status-text{font-size:12px;color:rgba(255,255,255,0.3)}
+  .history-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
+  .history-col-title{font-size:10px;color:rgba(255,255,255,0.2);text-transform:uppercase;
+    letter-spacing:.06em;margin-bottom:6px}
   .section-title{font-size:10px;color:rgba(255,255,255,0.2);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
-  .history-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
-  .history-col-title{font-size:10px;color:rgba(255,255,255,0.2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
   .timeline{display:flex;flex-direction:column;gap:5px}
   .tl-item{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;
     background:#1a1820;border-radius:9px;border:0.5px solid rgba(255,255,255,0.05)}
-  @keyframes slideIn {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
-  }
-  .tl-item-new { animation: slideIn 0.25s ease; }
-
-  @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(83,74,183,0.4); }
-    70%  { box-shadow: 0 0 0 6px rgba(83,74,183,0); }
-    100% { box-shadow: 0 0 0 0 rgba(83,74,183,0); }
-  }
-  .card-pulse { animation: pulse 0.6s ease; }
-
-  @keyframes fadeUpdate {
-    0%   { background: rgba(83,74,183,0.15); }
-    100% { background: #1a1820; }
-  }
-  .card-updated { animation: fadeUpdate 0.8s ease; }
   .tl-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;margin-top:4px}
   .tl-dot-you{background:#534ab7}.tl-dot-her{background:#d4537e}
   .tl-time{font-size:11px;color:rgba(255,255,255,0.2);min-width:36px;flex-shrink:0}
   .tl-app{font-size:12px;color:rgba(255,255,255,0.6);word-break:break-word;line-height:1.4}
-  #page-settings{display:none}
+  @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+  .tl-item-new{animation:slideIn 0.25s ease}
+  @keyframes fadeUpdate{0%{background:rgba(83,74,183,0.15)}100%{background:#1a1820}}
+  .card-updated{animation:fadeUpdate 0.8s ease}
+  #page-settings,#page-stats{display:none}
   .settings-row{display:flex;justify-content:space-between;align-items:center;
     padding:11px 0;border-bottom:0.5px solid rgba(255,255,255,0.05);font-size:13px}
   .settings-label{color:rgba(255,255,255,0.55)}
@@ -126,7 +115,7 @@ HTML = r"""
 <body>
 <div class="titlebar">
   <div class="titlebar-title"><span class="heart">♥</span> Together</div>
-  <div style="-webkit-app-region:no-drag;display:flex;gap:4px">
+  <div class="titlebar-btns">
     <button class="titlebar-close" onclick="pywebview.api.minimize_window()" title="Свернуть">—</button>
     <button class="titlebar-close" onclick="pywebview.api.hide_window()" title="В трей">✕</button>
   </div>
@@ -134,8 +123,11 @@ HTML = r"""
 <div class="content">
   <div class="nav">
     <button class="nav-btn active" onclick="showPage('main',this)">Активность</button>
-    <button class="nav-btn" onclick="showPage('settings',this)">Настройки</button>
+    <button class="nav-btn" onclick="showPage('stats',this)">Статистика</button>
+    <button class="nav-btn" onclick="showPage('settings',this)">⚙</button>
   </div>
+
+  <!-- АКТИВНОСТЬ -->
   <div id="page-main">
     <div class="status-row">
       <div class="dot dot-waiting" id="conn-dot"></div>
@@ -163,17 +155,33 @@ HTML = r"""
       <div>
         <div class="history-col-title" id="my-col-title">ты</div>
         <div class="timeline" id="timeline-you">
-          <div class="tl-item"><div class="tl-time">—</div><div class="tl-dot tl-dot-you"></div><div class="tl-app">—</div></div>
+          <div class="tl-item"><div class="tl-time">—</div>
+            <div class="tl-dot tl-dot-you"></div><div class="tl-app">—</div></div>
         </div>
       </div>
       <div>
         <div class="history-col-title" id="her-col-title">она</div>
         <div class="timeline" id="timeline-her">
-          <div class="tl-item"><div class="tl-time">—</div><div class="tl-dot tl-dot-her"></div><div class="tl-app">—</div></div>
+          <div class="tl-item"><div class="tl-time">—</div>
+            <div class="tl-dot tl-dot-her"></div><div class="tl-app">—</div></div>
         </div>
       </div>
     </div>
   </div>
+
+  <!-- СТАТИСТИКА -->
+  <div id="page-stats">
+    <div class="section-title" id="stats-date">сегодня</div>
+    <div id="stats-categories" style="margin-bottom:16px"></div>
+    <div class="section-title">топ приложений</div>
+    <div id="stats-apps"></div>
+    <div style="display:flex;gap:6px;margin-top:14px">
+      <button class="btn btn-primary" id="btn-today" onclick="loadStats('today')" style="flex:1">Сегодня</button>
+      <button class="btn" id="btn-week" onclick="loadStats('week')" style="flex:1">7 дней</button>
+    </div>
+  </div>
+
+  <!-- НАСТРОЙКИ -->
   <div id="page-settings">
     <div class="settings-row">
       <span class="settings-label">Моё имя</span>
@@ -211,17 +219,23 @@ HTML = r"""
     </div>
   </div>
 </div>
+
 <script>
 const BADGES={gaming:'🎮 игра',browser:'🌐 браузер',chat:'💬 чат',
   music:'🎵 музыка',video:'▶ видео',work:'💻 работа',
   idle:'😴 AFK',streaming:'📡 стрим',other:'•'};
+const CAT_COLORS={gaming:'#a89ef0',browser:'#7ab8ef',chat:'#5ddaaa',
+  music:'#f0b352',video:'#f08080',work:'#a8d865',
+  idle:'rgba(255,255,255,0.15)',other:'rgba(255,255,255,0.15)'};
 
 function showPage(name,btn){
-  document.getElementById('page-main').style.display=name==='main'?'block':'none';
-  document.getElementById('page-settings').style.display=name==='settings'?'block':'none';
+  ['main','stats','settings'].forEach(p=>{
+    document.getElementById('page-'+p).style.display = p===name?'block':'none';
+  });
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   if(name==='settings') loadSettings();
+  if(name==='stats') loadStats('today');
 }
 
 function timeSince(iso){
@@ -232,74 +246,62 @@ function timeSince(iso){
   return Math.floor(m/60)+' ч '+(m%60)+' мин';
 }
 
-let _prevApp = {my: '', her: ''};
-
-function updateCard(prefix, data, online) {
-  document.getElementById(prefix+'-card').classList.toggle('offline-card', !online);
-  
-  const appEl = document.getElementById(prefix+'-app');
-  const newApp = online ? (data.app||'—') : 'не в сети';
-  
-  // Анимация если приложение сменилось
-  if (newApp !== _prevApp[prefix]) {
-    _prevApp[prefix] = newApp;
-    const card = document.getElementById(prefix+'-card');
-    card.classList.remove('card-updated');
-    void card.offsetWidth; // reflow чтобы анимация перезапустилась
-    card.classList.add('card-updated');
-  }
-
-  appEl.textContent = newApp;
-  document.getElementById(prefix+'-title').textContent = online?(data.title||''):'';
-  document.getElementById(prefix+'-time').textContent = online?timeSince(data.since):'';
-  if (data.name) {
-    document.getElementById(prefix+'-avatar').textContent = data.name[0].toUpperCase();
-    document.getElementById(prefix+'-label').textContent = data.name;
-    const colId = prefix==='my' ? 'my-col-title' : 'her-col-title';
-    const colEl = document.getElementById(colId);
-    if (colEl) colEl.textContent = data.name;
-  }
-  const cat = data.afk ? 'idle' : (data.category||'other');
-  const badge = document.getElementById(prefix+'-badge');
-  badge.className = 'badge badge-'+(online?cat:'idle');
-  badge.textContent = !online?'офлайн':(data.afk?'😴 AFK':(BADGES[cat]||cat));
+function fmtTime(s){
+  if(s<60) return s+'с';
+  const m=Math.floor(s/60);
+  if(m<60) return m+'м';
+  const h=Math.floor(m/60);
+  return h+'ч '+(m%60?(' '+(m%60)+'м'):'');
 }
 
-let _prevFirst = { you: '', her: '' };
+let _prevApp={my:'',her:''};
+function updateCard(prefix,data,online){
+  document.getElementById(prefix+'-card').classList.toggle('offline-card',!online);
+  const newApp=online?(data.app||'—'):'не в сети';
+  if(newApp!==_prevApp[prefix]){
+    _prevApp[prefix]=newApp;
+    const card=document.getElementById(prefix+'-card');
+    card.classList.remove('card-updated');
+    void card.offsetWidth;
+    card.classList.add('card-updated');
+  }
+  document.getElementById(prefix+'-app').textContent=newApp;
+  document.getElementById(prefix+'-title').textContent=online?(data.title||''):'';
+  document.getElementById(prefix+'-time').textContent=online?timeSince(data.since):'';
+  if(data.name){
+    document.getElementById(prefix+'-avatar').textContent=data.name[0].toUpperCase();
+    document.getElementById(prefix+'-label').textContent=data.name;
+    const col=document.getElementById(prefix==='my'?'my-col-title':'her-col-title');
+    if(col) col.textContent=data.name;
+  }
+  const cat=data.afk?'idle':(data.category||'other');
+  const badge=document.getElementById(prefix+'-badge');
+  badge.className='badge badge-'+(online?cat:'idle');
+  badge.textContent=!online?'офлайн':(data.afk?'😴 AFK':(BADGES[cat]||cat));
+}
 
-function updateTimeline(myH, herH) {
-
-  const renderCol = (items, who, prevFirst) => {
-    if (!items || !items.length) {
-      return `
-        <div class="tl-item">
-          <div class="tl-time">—</div>
-          <div class="tl-dot tl-dot-${who}"></div>
-          <div class="tl-app">пусто</div>
-        </div>`;
-    }
-
-    return items.slice(0, 8).map((h, i) => {
-      const isNew = i === 0 && h.app !== prevFirst;
-
-      return `
-        <div class="tl-item${isNew ? ' tl-item-new' : ''}">
-          <div class="tl-time">${h.time}</div>
-          <div class="tl-dot tl-dot-${who}"></div>
-          <div class="tl-app">${h.app}${h.title ? ' — ' + h.title : ''}</div>
-        </div>`;
+let _prevFirst={you:'',her:''};
+function updateTimeline(myH,herH){
+  const renderCol=(items,who)=>{
+    if(!items||!items.length) return `
+      <div class="tl-item">
+        <div class="tl-time">—</div>
+        <div class="tl-dot tl-dot-${who}"></div>
+        <div class="tl-app">пусто</div>
+      </div>`;
+    return items.slice(0,8).map((h,i)=>{
+      const isNew=i===0&&h.app!==_prevFirst[who];
+      return `<div class="tl-item${isNew?' tl-item-new':''}">
+        <div class="tl-time">${h.time}</div>
+        <div class="tl-dot tl-dot-${who}"></div>
+        <div class="tl-app">${h.app}${h.title?' — '+h.title:''}</div>
+      </div>`;
     }).join('');
   };
-
-  document.getElementById('timeline-you').innerHTML =
-    renderCol(myH, 'you', _prevFirst.you);
-
-  document.getElementById('timeline-her').innerHTML =
-    renderCol(herH, 'her', _prevFirst.her);
-
-  // сохраняем новые первые элементы
-  if (myH?.[0]) _prevFirst.you = myH[0].app;
-  if (herH?.[0]) _prevFirst.her = herH[0].app;
+  document.getElementById('timeline-you').innerHTML=renderCol(myH,'you');
+  document.getElementById('timeline-her').innerHTML=renderCol(herH,'her');
+  if(myH&&myH[0])  _prevFirst.you=myH[0].app;
+  if(herH&&herH[0]) _prevFirst.her=herH[0].app;
 }
 
 function updateStatus(c){
@@ -338,6 +340,41 @@ function toggleAutostart(){
   });
 }
 
+function loadStats(period){
+  document.getElementById('btn-today').className='btn'+(period==='today'?' btn-primary':'');
+  document.getElementById('btn-week').className ='btn'+(period==='week' ?' btn-primary':'');
+  pywebview.api.get_stats(period).then(data=>{
+    document.getElementById('stats-date').textContent=
+      period==='today'?'сегодня':'последние 7 дней';
+    const total=data.total||1;
+    document.getElementById('stats-categories').innerHTML=
+      (data.categories||[]).length===0
+        ? '<div style="color:rgba(255,255,255,0.2);font-size:12px;margin-bottom:8px">нет данных — запусти и поработай немного</div>'
+        : (data.categories||[]).map(c=>{
+            const pct=Math.round(c.seconds/total*100);
+            const color=CAT_COLORS[c.category]||'rgba(255,255,255,0.2)';
+            return `<div style="margin-bottom:8px">
+              <div style="display:flex;justify-content:space-between;font-size:11px;
+                color:rgba(255,255,255,0.4);margin-bottom:4px">
+                <span>${c.category}</span><span>${fmtTime(c.seconds)}</span></div>
+              <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px">
+                <div style="height:4px;width:${pct}%;background:${color};
+                  border-radius:2px;transition:width .5s ease"></div>
+              </div></div>`;
+          }).join('');
+    document.getElementById('stats-apps').innerHTML=
+      (data.apps||[]).map((a,i)=>{
+        const color=CAT_COLORS[a.category]||'rgba(255,255,255,0.2)';
+        return `<div class="tl-item" style="margin-bottom:5px">
+          <div style="font-size:11px;color:rgba(255,255,255,0.2);min-width:16px">${i+1}</div>
+          <div style="width:6px;height:6px;border-radius:50%;background:${color};flex-shrink:0;margin-top:3px"></div>
+          <div style="flex:1;font-size:12px;color:rgba(255,255,255,0.7)">${a.app}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.3)">${fmtTime(a.seconds)}</div>
+        </div>`;
+      }).join('');
+  }).catch(()=>{});
+}
+
 function tick(){
   if(!window.pywebview) return;
   pywebview.api.get_state().then(s=>{
@@ -363,7 +400,7 @@ window.addEventListener('pywebviewready',()=>{ tick(); setInterval(tick,1500); }
 class WindowAPI:
     def get_state(self):
         from core.tracker import load_settings
-        s = load_settings()
+        s         = load_settings()
         current   = _tracker.get_current()
         history   = _tracker.get_history()
         partner   = _network.get_partner_data() if _network else None
@@ -374,6 +411,7 @@ class WindowAPI:
                 "app":   h.get("app","—"),
                 "title": h.get("title",""),
                 "time":  h["timestamp"].strftime("%H:%M") if h.get("timestamp") else "—",
+                "ts":    h["timestamp"].isoformat()       if h.get("timestamp") else "0",
                 "who":   who,
             } for h in items[:10]]
 
@@ -384,7 +422,7 @@ class WindowAPI:
                 "since":    current.get("since", datetime.now()).isoformat(),
                 "category": current.get("category","other"),
                 "afk":      current.get("afk", False),
-                "name":     s.get("name", "Я"),
+                "name":     s.get("name","Я"),
             },
             "my_history": fmt(history, "you"),
             "partner":    partner,
@@ -416,18 +454,33 @@ class WindowAPI:
             print("save_settings error:", e)
         return True
 
+    def get_stats(self, period):
+        from core.stats import fmt_time
+        if not _stats:
+            return {"apps": [], "categories": [], "total": 0}
+        if period == "week":
+            apps = _stats.get_week()
+            cats_raw = {}
+            for a in apps:
+                c = a["category"]
+                cats_raw[c] = cats_raw.get(c, 0) + a["seconds"]
+            categories = [{"category": k, "seconds": v}
+                          for k, v in sorted(cats_raw.items(), key=lambda x: -x[1])]
+        else:
+            apps       = _stats.get_today()
+            categories = _stats.get_category_totals()
+        total = sum(a["seconds"] for a in apps)
+        return {"apps": apps, "categories": categories, "total": total}
+
     def hide_window(self):
-        """Скрывает окно — приложение продолжает работать в трее"""
         if _window:
             _window.hide()
-            
+
     def minimize_window(self):
-        """Сворачивает окно в панель задач"""
         if _window:
             _window.minimize()
 
     def quit_app(self):
-        """Полный выход — вызывается из кнопки Выйти в настройках"""
         _do_quit()
 
     def toggle_autostart(self):
@@ -438,13 +491,13 @@ class WindowAPI:
 
 
 def _do_quit():
-    """Единая точка выхода — безопасно завершает всё"""
     _tracker.stop()
     if _network:
         _network.stop()
+    if _stats:
+        _stats.stop()
     if _window:
         _window.destroy()
-    # destroy() завершит webview.start() → run_webview_loop вернётся → os._exit
 
 
 def open_window():
@@ -452,14 +505,15 @@ def open_window():
         _window.show()
 
 
-def run_webview_loop(tracker, network):
-    global _tracker, _network, _window
+def run_webview_loop(tracker, network, stats=None):
+    global _tracker, _network, _window, _stats
     import builtins
 
     _tracker = tracker
     _network = network
+    _stats   = stats
     builtins._together_open_window = open_window
-    builtins._together_quit = _do_quit  # трей вызывает это вместо sys.exit
+    builtins._together_quit        = _do_quit
 
     api = WindowAPI()
     _window = webview.create_window(
@@ -467,28 +521,26 @@ def run_webview_loop(tracker, network):
         html=HTML,
         js_api=api,
         width=480,
-        height=590,
+        height=600,
         resizable=False,
         frameless=True,
         easy_drag=True,
         background_color="#0f0f13",
         hidden=True,
-        on_top=False,
     )
+
     def hide_from_taskbar():
-      import ctypes
-      hwnd = ctypes.windll.user32.FindWindowW(None, "Together")
-      if hwnd:
-          # Убираем из панели задач
-          GWL_EXSTYLE = -20
-          WS_EX_TOOLWINDOW = 0x00000080
-          WS_EX_APPWINDOW  = 0x00040000
-          style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-          style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
-          ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+        import ctypes
+        hwnd = ctypes.windll.user32.FindWindowW(None, "Together")
+        if hwnd:
+            GWL_EXSTYLE     = -20
+            WS_EX_TOOLWINDOW = 0x00000080
+            WS_EX_APPWINDOW  = 0x00040000
+            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
 
     threading.Timer(1.5, hide_from_taskbar).start()
-  
-    
+
     webview.start(debug=False)
     os._exit(0)

@@ -11,27 +11,25 @@ from core.tracker import ActivityTracker
 from core.network import NetworkManager
 from core.autostart import setup_autostart
 from core.tray import TrayApp
+from core.stats import StatsTracker
+
 
 def main():
     setup_autostart()
 
     tracker = ActivityTracker()
     network = NetworkManager(tracker)
+    stats   = StatsTracker(tracker)
 
-    # Трей запускаем в отдельном потоке
     app = TrayApp(tracker, network)
-    threading.Thread(target=app.run, daemon=True).start()
-
-    # Трекер в отдельном потоке
+    threading.Thread(target=app.run,       daemon=True).start()
     threading.Thread(target=tracker.start, daemon=True).start()
-
-    # Сеть в отдельном потоке
     threading.Thread(target=network.start, daemon=True).start()
+    threading.Thread(target=stats.start,   daemon=True).start()
 
-    # Главный поток держим для pywebview
-    # Запускаем webview loop — он будет ждать команд от трея
     from ui.window import run_webview_loop
-    run_webview_loop(tracker, network)
+    run_webview_loop(tracker, network, stats)
+
 
 if __name__ == "__main__":
     main()

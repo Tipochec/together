@@ -2,6 +2,5 @@
   "name": "",
   "partner_name": "",
   "ip": "",
-  "private_mode": false,
-  "autostart": true
+  "private_mode": false
 }
