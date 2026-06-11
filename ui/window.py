@@ -219,13 +219,16 @@ function updateCard(prefix,data,online){
   badge.textContent=!online?'офлайн':(data.afk?'😴 AFK':(BADGES[cat]||cat));
 }
 
-function updateTimeline(myH,herH){
-  const all=[
-    ...(myH||[]).map(h=>({...h,who:'you'})),
-    ...(herH||[]).map(h=>({...h,who:'her'})),
-  ].sort((a,b)=>b.time.localeCompare(a.time)).slice(0,15);
-  if(!all.length) return;
-  document.getElementById('timeline').innerHTML=all.map(h=>`
+function updateTimeline(myH, herH) {
+  // Показываем поочерёдно: сначала самое свежее от каждого
+  const maxLen = Math.max((myH||[]).length, (herH||[]).length);
+  const all = [];
+  for (let i = 0; i < maxLen; i++) {
+    if (herH && herH[i]) all.push({...herH[i], who:'her'});
+    if (myH  && myH[i])  all.push({...myH[i],  who:'you'});
+  }
+  if (!all.length) return;
+  document.getElementById('timeline').innerHTML = all.slice(0,15).map(h => `
     <div class="tl-item">
       <div class="tl-time">${h.time}</div>
       <div class="tl-dot tl-dot-${h.who}"></div>
