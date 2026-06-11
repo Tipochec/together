@@ -64,6 +64,8 @@ HTML = r"""
   .status-text{font-size:12px;color:rgba(255,255,255,0.3)}
   .section-title{font-size:10px;color:rgba(255,255,255,0.2);
     text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px}
+  .history-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
+  .history-col-title{font-size:10px;color:rgba(255,255,255,0.2);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
   .timeline{display:flex;flex-direction:column;gap:5px}
   .tl-item{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;
     background:#1a1820;border-radius:9px;border:0.5px solid rgba(255,255,255,0.05)}
@@ -137,12 +139,18 @@ HTML = r"""
         <div class="badge badge-idle" id="her-badge">офлайн</div>
       </div>
     </div>
-    <div class="section-title">история</div>
-    <div class="timeline" id="timeline">
-      <div class="tl-item">
-        <div class="tl-time">—</div>
-        <div class="tl-dot tl-dot-you"></div>
-        <div class="tl-app">история появится здесь</div>
+    <div class="history-cols">
+      <div>
+        <div class="history-col-title" id="my-col-title">ты</div>
+        <div class="timeline" id="timeline-you">
+          <div class="tl-item"><div class="tl-time">—</div><div class="tl-dot tl-dot-you"></div><div class="tl-app">—</div></div>
+        </div>
+      </div>
+      <div>
+        <div class="history-col-title" id="her-col-title">она</div>
+        <div class="timeline" id="timeline-her">
+          <div class="tl-item"><div class="tl-time">—</div><div class="tl-dot tl-dot-her"></div><div class="tl-app">—</div></div>
+        </div>
       </div>
     </div>
   </div>
@@ -212,6 +220,9 @@ function updateCard(prefix,data,online){
   if(data.name){
     document.getElementById(prefix+'-avatar').textContent=data.name[0].toUpperCase();
     document.getElementById(prefix+'-label').textContent=data.name;
+    const colId = prefix==='my' ? 'my-col-title' : 'her-col-title';
+    const colEl = document.getElementById(colId);
+    if (colEl && data.name) colEl.textContent = data.name;
   }
   const cat=data.afk?'idle':(data.category||'other');
   const badge=document.getElementById(prefix+'-badge');
@@ -220,20 +231,22 @@ function updateCard(prefix,data,online){
 }
 
 function updateTimeline(myH, herH) {
-  // Показываем поочерёдно: сначала самое свежее от каждого
-  const maxLen = Math.max((myH||[]).length, (herH||[]).length);
-  const all = [];
-  for (let i = 0; i < maxLen; i++) {
-    if (herH && herH[i]) all.push({...herH[i], who:'her'});
-    if (myH  && myH[i])  all.push({...myH[i],  who:'you'});
-  }
-  if (!all.length) return;
-  document.getElementById('timeline').innerHTML = all.slice(0,15).map(h => `
-    <div class="tl-item">
-      <div class="tl-time">${h.time}</div>
-      <div class="tl-dot tl-dot-${h.who}"></div>
-      <div class="tl-app">${h.app}${h.title?' — '+h.title:''}</div>
-    </div>`).join('');
+  const renderCol = (items, who) => {
+    if (!items || !items.length) return `
+      <div class="tl-item">
+        <div class="tl-time">—</div>
+        <div class="tl-dot tl-dot-${who}"></div>
+        <div class="tl-app">пусто</div>
+      </div>`;
+    return items.slice(0,8).map(h => `
+      <div class="tl-item">
+        <div class="tl-time">${h.time}</div>
+        <div class="tl-dot tl-dot-${who}"></div>
+        <div class="tl-app">${h.app}${h.title?' — '+h.title:''}</div>
+      </div>`).join('');
+  };
+  document.getElementById('timeline-you').innerHTML = renderCol(myH, 'you');
+  document.getElementById('timeline-her').innerHTML = renderCol(herH, 'her');
 }
 
 function updateStatus(c){
@@ -395,7 +408,7 @@ def run_webview_loop(tracker, network):
         title="Together",
         html=HTML,
         js_api=api,
-        width=380,
+        width=480,
         height=590,
         resizable=False,
         frameless=True,
