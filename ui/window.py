@@ -224,9 +224,41 @@ HTML = r"""
 const BADGES={gaming:'🎮 игра',browser:'🌐 браузер',chat:'💬 чат',
   music:'🎵 музыка',video:'▶ видео',work:'💻 работа',
   idle:'😴 AFK',streaming:'📡 стрим',other:'•'};
-const CAT_COLORS={gaming:'#a89ef0',browser:'#7ab8ef',chat:'#5ddaaa',
-  music:'#f0b352',video:'#f08080',work:'#a8d865',
-  idle:'rgba(255,255,255,0.15)',other:'rgba(255,255,255,0.15)'};
+const CAT_COLORS = {
+  gaming:'#a89ef0',
+  browser:'#7ab8ef',
+  chat:'#5ddaaa',
+  music:'#f0b352',
+  work:'#a8d865',
+
+  torrent:'#c678ff',
+  photo:'#ff9ecb',
+  vpn:'#58c4c4',
+  archive:'#c9a66b',
+  myapps:'#ff7b72',
+
+  video:'#f08080',
+  idle:'rgba(255,255,255,0.15)',
+  other:'rgba(255,255,255,0.15)'
+};
+
+const CAT_NAMES = {
+    browser: '🌐 Браузер',
+    chat: '💬 Общение',
+    work: '💻 Работа',
+    music: '🎵 Музыка',
+    gaming: '🎮 Игры',
+
+    torrent: '⬇️ Торренты',
+    photo: '🖼️ Фото',
+    vpn: '🔒 VPN',
+    archive: '📦 Архивы',
+    myapps: '🛠️ Мои приложения',
+
+    streaming: '📡 Стрим',
+    idle: '😴 AFK',
+    other: '• Другое'
+};
 
 function showPage(name,btn){
   ['main','stats','settings'].forEach(p=>{
@@ -356,7 +388,8 @@ function loadStats(period){
             return `<div style="margin-bottom:8px">
               <div style="display:flex;justify-content:space-between;font-size:11px;
                 color:rgba(255,255,255,0.4);margin-bottom:4px">
-                <span>${c.category}</span><span>${fmtTime(c.seconds)}</span></div>
+                <span>${CAT_NAMES[c.category] || c.category}</span>
+                <span>${fmtTime(c.seconds)}</span></div>
               <div style="height:4px;background:rgba(255,255,255,0.06);border-radius:2px">
                 <div style="height:4px;width:${pct}%;background:${color};
                   border-radius:2px;transition:width .5s ease"></div>

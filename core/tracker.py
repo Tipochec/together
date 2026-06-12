@@ -45,16 +45,40 @@ BROWSER_PROCESSES = {
 }
 
 CATEGORIES = {
-    "Google Chrome": "browser", "Firefox": "browser",
-    "Microsoft Edge": "browser", "Opera": "browser",
-    "Brave": "browser", "Vivaldi": "browser",
-    "Steam": "gaming", "CS2": "gaming", "Dota 2": "gaming",
-    "Discord": "chat", "Telegram": "chat", "Slack": "chat", "Zoom": "chat",
-    "Spotify": "music", "VLC": "video",
-    "VS Code": "work", "PyCharm": "work", "IntelliJ IDEA": "work",
-    "Figma": "work", "Photoshop": "work",
-    "OBS Studio": "streaming",
-    "Рабочий стол": "idle",
+# Браузеры
+    "Google Chrome": "browser",
+
+    # Общение
+    "Discord": "chat",
+    "Telegram": "chat",
+
+    # Работа
+    "VS Code": "work",
+    "Wps": "work",
+
+    # Музыка
+    "Яндекс музыка": "music",
+
+    # Игры
+    "Steam": "gaming",
+    "Xr_3da": "gaming",      # S.T.A.L.K.E.R.
+    "Isaac-ng": "gaming",    # The Binding of Isaac
+
+    # Торренты
+    "Qbittorrent": "torrent",
+
+    # Фото
+    "Photos": "photo",
+
+    # VPN
+    "V2raytun": "vpn",
+
+    # Архиваторы
+    "7zfm": "archive",
+    "Winrar": "archive",
+
+    # Мои приложения
+    "Python3.12": "myapps",
 }
 
 AFK_TIMEOUT = 300
