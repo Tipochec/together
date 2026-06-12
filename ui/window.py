@@ -236,6 +236,7 @@ const CAT_COLORS = {
   vpn:'#58c4c4',
   archive:'#c9a66b',
   myapps:'#ff7b72',
+  Paneltask:'#FFD700',
 
   video:'#f08080',
   idle:'rgba(255,255,255,0.15)',
@@ -248,6 +249,7 @@ const CAT_NAMES = {
     work: '💻 Работа',
     music: '🎵 Музыка',
     gaming: '🎮 Игры',
+    Paneltask: 'Панель задач',
 
     torrent: '⬇️ Торренты',
     photo: '🖼️ Фото',

@@ -79,6 +79,8 @@ CATEGORIES = {
 
     # Мои приложения
     "Python3.12": "myapps",
+    
+    "Searchapp": "Paneltask"
 }
 
 AFK_TIMEOUT = 300
