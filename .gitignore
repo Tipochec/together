@@ -1,8 +1,12 @@
 # Личные настройки
 settings.json
 
+# Кеш AI-категорий (у каждого свой)
+ai_categories_cache.json
+
 # База данных статистики
 stats.db
+stats(1).db
 
 # Python
 __pycache__/

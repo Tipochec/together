@@ -171,6 +171,7 @@ HTML = r"""
 
   <!-- СТАТИСТИКА -->
   <div id="page-stats">
+    <div id="session-time" style="background:#1a1820;border-radius:10px;padding:10px 12px;margin-bottom:14px;border:0.5px solid rgba(255,255,255,0.06)"></div>
     <div class="section-title" id="stats-date">сегодня</div>
     <div id="stats-categories" style="margin-bottom:16px"></div>
     <div class="section-title">топ приложений</div>
@@ -201,6 +202,13 @@ HTML = r"""
     </div>
     <div class="settings-row">
       <span class="settings-label">
+        🤖 Gemini API ключ
+        <div style="font-size:10px;color:rgba(255,255,255,0.25);margin-top:2px">для авто-категорий новых программ</div>
+      </span>
+      <input class="si" id="inp-gemini-key" placeholder="AIza..." type="password"/>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">
         🕵️ Приватный режим
         <div style="font-size:10px;color:rgba(255,255,255,0.25);margin-top:2px">скрывает вкладку браузера</div>
       </span>
@@ -217,6 +225,11 @@ HTML = r"""
       <button class="btn btn-primary" id="btn-save" onclick="saveSettings()">Сохранить</button>
       <button class="btn btn-danger" onclick="pywebview.api.quit_app()">Выйти</button>
     </div>
+    <div style="margin-top:16px">
+      <button class="btn" onclick="runDebugScan()" style="width:100%">🔍 Что видит сканер сейчас?</button>
+      <div id="debug-result" style="margin-top:10px;font-size:11px;color:rgba(255,255,255,0.4);
+        max-height:200px;overflow-y:auto"></div>
+    </div>
   </div>
 </div>
 
@@ -224,6 +237,23 @@ HTML = r"""
 const BADGES={gaming:'🎮 игра',browser:'🌐 браузер',chat:'💬 чат',
   music:'🎵 музыка',video:'▶ видео',work:'💻 работа',
   idle:'😴 AFK',streaming:'📡 стрим',other:'•'};
+const STATUS_LABEL={'active':'','watching':'📺 медиа','afk':'😴 AFK'};
+
+function runDebugScan(){
+  const el=document.getElementById('debug-result');
+  el.innerHTML='<div style="color:rgba(255,255,255,0.2)">сканирую...</div>';
+  pywebview.api.debug_scan().then(rows=>{
+    if(!rows||!rows.length){ el.innerHTML='<div>ничего не найдено</div>'; return; }
+    el.innerHTML=rows.map(r=>`
+      <div style="padding:4px 0;border-bottom:0.5px solid rgba(255,255,255,0.05);
+        display:flex;justify-content:space-between;gap:8px">
+        <span style="color:${r.ignored?'rgba(255,255,255,0.2)':'#a89ef0'}">${r.proc}</span>
+        <span style="color:rgba(255,255,255,0.25);overflow:hidden;text-overflow:ellipsis;
+          white-space:nowrap;flex:1;text-align:right">${r.title}</span>
+        <span style="color:${r.ignored?'#d4537e':'#1d9e75'}">${r.ignored?'игнор':'учтён'}</span>
+      </div>`).join('');
+  }).catch(e=>{ el.innerHTML='<div style="color:#d4537e">ошибка: '+e+'</div>'; });
+}
 const CAT_COLORS = {
   gaming:'#a89ef0',
   browser:'#7ab8ef',
@@ -310,10 +340,14 @@ function updateCard(prefix,data,online){
     const col=document.getElementById(prefix==='my'?'my-col-title':'her-col-title');
     if(col) col.textContent=data.name;
   }
-  const cat=data.afk?'idle':(data.category||'other');
+  const status=data.status||'active';
+  const cat=status==='afk'?'idle':(data.category||'other');
   const badge=document.getElementById(prefix+'-badge');
   badge.className='badge badge-'+(online?cat:'idle');
-  badge.textContent=!online?'офлайн':(data.afk?'😴 AFK':(BADGES[cat]||cat));
+  if(!online) badge.textContent='офлайн';
+  else if(status==='afk') badge.textContent='😴 AFK';
+  else if(status==='watching') badge.textContent='📺 смотрит';
+  else badge.textContent=BADGES[cat]||cat;
 }
 
 let _prevFirst={you:'',her:''};
@@ -326,7 +360,7 @@ function updateTimeline(myH,herH){
         <div class="tl-app">пусто</div>
       </div>`;
     return items.slice(0,8).map((h,i)=>{
-      const isNew=i===0&&h.app!==_prevFirst[who];
+      const isNew=i===0&&(h.app+h.time)!==_prevFirst[who];
       return `<div class="tl-item${isNew?' tl-item-new':''}">
         <div class="tl-time">${h.time}</div>
         <div class="tl-dot tl-dot-${who}"></div>
@@ -336,8 +370,8 @@ function updateTimeline(myH,herH){
   };
   document.getElementById('timeline-you').innerHTML=renderCol(myH,'you');
   document.getElementById('timeline-her').innerHTML=renderCol(herH,'her');
-  if(myH&&myH[0])  _prevFirst.you=myH[0].app;
-  if(herH&&herH[0]) _prevFirst.her=herH[0].app;
+  if(myH&&myH[0])  _prevFirst.you=myH[0].app+myH[0].time;
+  if(herH&&herH[0]) _prevFirst.her=herH[0].app+herH[0].time;
 }
 
 function updateStatus(c){
@@ -350,6 +384,7 @@ function loadSettings(){
     document.getElementById('inp-name').value=s.name||'';
     document.getElementById('inp-partner-name').value=s.partner_name||'';
     document.getElementById('inp-ip').value=s.ip||'';
+    document.getElementById('inp-gemini-key').value=s.gemini_api_key||'';
     document.getElementById('my-ip').textContent=s.my_ip||'—';
     document.getElementById('btn-autostart').textContent=s.autostart?'включён ✓':'выключен';
     document.getElementById('tog-private').checked=s.private_mode||false;
@@ -361,6 +396,7 @@ function saveSettings(){
     name:document.getElementById('inp-name').value,
     partner_name:document.getElementById('inp-partner-name').value,
     ip:document.getElementById('inp-ip').value,
+    gemini_api_key:document.getElementById('inp-gemini-key').value,
   }).then(()=>{
     const b=document.getElementById('btn-save');
     b.textContent='Сохранено ✓';
@@ -374,6 +410,37 @@ function toggleAutostart(){
   pywebview.api.toggle_autostart().then(on=>{
     document.getElementById('btn-autostart').textContent=on?'включён ✓':'выключен';
   });
+}
+
+function fmtHMS(s){
+  if(!s||s<60) return s+'с';
+  const m=Math.floor(s/60);
+  if(m<60) return m+'м';
+  const h=Math.floor(m/60);
+  return h+'ч'+(m%60?' '+(m%60)+'м':'');
+}
+
+function loadTimeStats(){
+  pywebview.api.get_time_stats().then(t=>{
+    if(!t||!t.total) return;
+    const pctA = Math.round(t.active   / (t.total||1) * 100);
+    const pctW = Math.round(t.watching / (t.total||1) * 100);
+    const el = document.getElementById('session-time');
+    if(!el) return;
+    el.innerHTML = `
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:rgba(255,255,255,0.35);margin-bottom:6px">
+        <span>За сессию: <b style="color:rgba(255,255,255,0.7)">${fmtHMS(t.total)}</b></span>
+        <span style="color:rgba(255,255,255,0.2)">${fmtHMS(t.afk)} AFK</span>
+      </div>
+      <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;gap:2px">
+        <div style="width:${pctA}%;background:#534ab7;border-radius:3px;transition:width .5s"></div>
+        <div style="width:${pctW}%;background:#d4537e;border-radius:3px;transition:width .5s"></div>
+      </div>
+      <div style="display:flex;gap:12px;margin-top:5px;font-size:10px;color:rgba(255,255,255,0.25)">
+        <span><span style="color:#a89ef0">■</span> активен ${fmtHMS(t.active)}</span>
+        <span><span style="color:#d4537e">■</span> медиа ${fmtHMS(t.watching)}</span>
+      </div>`;
+  }).catch(()=>{});
 }
 
 function loadStats(period){
@@ -459,11 +526,13 @@ class WindowAPI:
                 "since":    current.get("since", datetime.now()).isoformat(),
                 "category": current.get("category","other"),
                 "afk":      current.get("afk", False),
+                "status":    current.get("status", "active"),
                 "name":     s.get("name","Я"),
             },
-            "my_history": fmt(history, "you"),
-            "partner":    partner,
-            "connected":  connected,
+            "my_history":  fmt(history, "you"),
+            "partner":     partner,
+            "connected":   connected,
+            "time_stats":  _tracker.get_time_stats(),
         }
 
     def get_settings(self):
@@ -508,6 +577,11 @@ class WindowAPI:
             categories = _stats.get_category_totals()
         total = sum(a["seconds"] for a in apps)
         return {"apps": apps, "categories": categories, "total": total}
+
+    def debug_scan(self):
+        if not _stats:
+            return []
+        return _stats.debug_scan()
 
     def hide_window(self):
         if _window:

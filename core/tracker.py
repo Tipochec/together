@@ -1,5 +1,6 @@
 """
-Трекер активности - читает активное окно каждую секунду
+Трекер активности - читает активное окно каждую секунду.
+Три состояния: active / watching / afk
 """
 import time
 import threading
@@ -10,7 +11,7 @@ import json
 from datetime import datetime
 from collections import deque
 
-user32 = ctypes.windll.user32
+user32   = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
 APP_NAMES = {
@@ -44,8 +45,9 @@ BROWSER_PROCESSES = {
     "opera.exe", "brave.exe", "vivaldi.exe",
 }
 
+# Категории — версия пользователя, как в его собственном tracker.py
 CATEGORIES = {
-# Браузеры
+    # Браузеры
     "Google Chrome": "browser",
 
     # Общение
@@ -82,11 +84,22 @@ CATEGORIES = {
     # Мои приложения
     "Python3.12": "myapps",
     "Python": "myapps",
-    
-    "Searchapp": "Paneltask"
+
+    "Searchapp": "Paneltask",
 }
 
-AFK_TIMEOUT = 300
+# Категории которые считаются медиа (не AFK даже без ввода)
+MEDIA_CATEGORIES = {"video", "music", "streaming"}
+
+# Ключевые слова в заголовке браузера = медиа
+MEDIA_TITLES = {
+    "youtube", "ютуб", "twitch", "netflix", "кинопоиск",
+    "okko", "иви", "premier", "vk видео", "vk video",
+    "rutube", "яндекс видео",
+}
+
+AFK_TIMEOUT  = 300   # 5 минут без ввода → проверяем медиа
+AFK_HARD     = 1800  # 30 минут без ввода → AFK в любом случае
 
 
 def _settings_path():
@@ -105,12 +118,19 @@ class ActivityTracker:
     def __init__(self):
         self.current = {
             "app": "—", "title": "", "category": "idle",
-            "since": datetime.now(), "afk": False,
+            "since": datetime.now(),
+            "status": "active",   # active | watching | afk
         }
-        self.history = deque(maxlen=50)
-        self._lock = threading.Lock()
+        self.history  = deque(maxlen=100)
+        self._lock    = threading.Lock()
         self._running = False
         self._on_change_callbacks = []
+
+        # Счётчики времени за сессию
+        self._time_active   = 0
+        self._time_watching = 0
+        self._time_afk      = 0
+        self._session_start = datetime.now()
 
     def on_change(self, cb):
         self._on_change_callbacks.append(cb)
@@ -123,49 +143,72 @@ class ActivityTracker:
         with self._lock:
             return list(self.history)
 
+    def get_time_stats(self):
+        with self._lock:
+            return {
+                "active":   self._time_active,
+                "watching": self._time_watching,
+                "afk":      self._time_afk,
+                "total":    self._time_active + self._time_watching,
+                "session_start": self._session_start.isoformat(),
+            }
+
     def start(self):
-        self._running = True
-        prev_app = None
+        self._running  = True
+        prev_app   = None
         prev_title = None
 
         while self._running:
             try:
                 proc_name, app, title = self._get_active_window()
-                afk = self._check_afk()
+                idle_secs = self._get_idle_seconds()
+                status    = self._calc_status(idle_secs, app, title)
 
-                # Приватный режим — скрываем вкладку браузера
                 settings = load_settings()
-                private = settings.get("private_mode", False)
-                if private and proc_name.lower() in BROWSER_PROCESSES:
+                if settings.get("private_mode") and proc_name.lower() in BROWSER_PROCESSES:
                     title = ""
 
                 changed = (app != prev_app or title != prev_title)
 
                 if changed:
                     now = datetime.now()
+                    category = CATEGORIES.get(app)
+                    if category is None:
+                        category = self._get_ai_category(app, title)
+
                     with self._lock:
                         if prev_app and prev_app != "—":
                             self.history.appendleft({
-                                "app": prev_app,
-                                "title": prev_title,
-                                "category": CATEGORIES.get(prev_app, "other"),
+                                "app":       prev_app,
+                                "title":     prev_title,
+                                "category":  CATEGORIES.get(prev_app, "other"),
                                 "timestamp": self.current["since"],
                             })
                         self.current = {
-                            "app": app, "title": title,
-                            "category": CATEGORIES.get(app, "other"),
-                            "since": now, "afk": afk,
+                            "app":      app,
+                            "title":    title,
+                            "category": category,
+                            "since":    now,
+                            "status":   status,
+                            "afk":      status == "afk",
                         }
-                    prev_app = app
+                    prev_app   = app
                     prev_title = title
                     for cb in self._on_change_callbacks:
-                        try:
-                            cb(self.current)
-                        except Exception:
-                            pass
+                        try: cb(self.current)
+                        except Exception: pass
                 else:
                     with self._lock:
-                        self.current["afk"] = afk
+                        self.current["status"] = status
+                        self.current["afk"]    = status == "afk"
+
+                with self._lock:
+                    if status == "active":
+                        self._time_active   += 1
+                    elif status == "watching":
+                        self._time_watching += 1
+                    else:
+                        self._time_afk      += 1
 
             except Exception:
                 pass
@@ -175,6 +218,32 @@ class ActivityTracker:
     def stop(self):
         self._running = False
 
+    def _calc_status(self, idle_secs, app, title):
+        if idle_secs < AFK_TIMEOUT:
+            return "active"
+        if idle_secs >= AFK_HARD:
+            return "afk"
+
+        category = CATEGORIES.get(app, "other")
+        if category in MEDIA_CATEGORIES:
+            return "watching"
+
+        if category == "browser" and title:
+            title_lower = title.lower()
+            if any(kw in title_lower for kw in MEDIA_TITLES):
+                return "watching"
+
+        return "afk"
+
+    def _get_idle_seconds(self):
+        try:
+            li = ctypes.wintypes.LASTINPUTINFO()
+            li.cbSize = ctypes.sizeof(li)
+            user32.GetLastInputInfo(ctypes.byref(li))
+            return (kernel32.GetTickCount() - li.dwTime) / 1000.0
+        except Exception:
+            return 0
+
     def _get_active_window(self):
         try:
             hwnd = user32.GetForegroundWindow()
@@ -182,7 +251,7 @@ class ActivityTracker:
                 return "explorer.exe", "Рабочий стол", ""
 
             length = user32.GetWindowTextLengthW(hwnd)
-            title = ""
+            title  = ""
             if length > 0:
                 buf = ctypes.create_unicode_buffer(length + 1)
                 user32.GetWindowTextW(hwnd, buf, length + 1)
@@ -191,9 +260,8 @@ class ActivityTracker:
             pid = ctypes.wintypes.DWORD()
             user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
             proc_name = self._get_process_name(pid.value)
-            app_name = APP_NAMES.get(proc_name.lower(), self._clean_process_name(proc_name))
+            app_name  = APP_NAMES.get(proc_name.lower(), self._clean_process_name(proc_name))
             clean_title = self._clean_title(title, app_name)
-
             return proc_name, app_name, clean_title
         except Exception:
             return "explorer.exe", "Рабочий стол", ""
@@ -203,7 +271,7 @@ class ActivityTracker:
             handle = kernel32.OpenProcess(0x0400 | 0x0010, False, pid)
             if not handle:
                 return "unknown.exe"
-            buf = ctypes.create_unicode_buffer(260)
+            buf  = ctypes.create_unicode_buffer(260)
             size = ctypes.wintypes.DWORD(260)
             ctypes.windll.psapi.GetModuleFileNameExW(handle, None, buf, size)
             kernel32.CloseHandle(handle)
@@ -226,12 +294,17 @@ class ActivityTracker:
     def _clean_process_name(self, name):
         return name.replace(".exe", "").replace(".EXE", "").capitalize() or "Неизвестно"
 
-    def _check_afk(self):
+    def _get_ai_category(self, app_name, title):
         try:
-            li = ctypes.wintypes.LASTINPUTINFO()
-            li.cbSize = ctypes.sizeof(li)
-            ctypes.windll.user32.GetLastInputInfo(ctypes.byref(li))
-            elapsed = (kernel32.GetTickCount() - li.dwTime) / 1000.0
-            return elapsed > AFK_TIMEOUT
+            from core.ai_classify import classify_app, _load_cache
+            key = app_name.lower().strip()
+            cache = _load_cache()
+            if key in cache:
+                return cache[key]
+
+            def worker():
+                classify_app(app_name, title)
+            threading.Thread(target=worker, daemon=True).start()
+            return "other"
         except Exception:
-            return False
+            return "other"
