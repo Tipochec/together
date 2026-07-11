@@ -2,5 +2,8 @@
   "name": "",
   "partner_name": "",
   "ip": "",
-  "private_mode": false
+  "private_mode": false,
+  "openrouter_api_key": "",
+  "openrouter_model": "meta-llama/llama-3.1-8b-instruct:free",
+  "extra_ignore_processes": []
 }

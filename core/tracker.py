@@ -14,89 +14,10 @@ from collections import deque
 user32   = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
-APP_NAMES = {
-    "chrome.exe":         "Google Chrome",
-    "firefox.exe":        "Firefox",
-    "msedge.exe":         "Microsoft Edge",
-    "opera.exe":          "Opera",
-    "brave.exe":          "Brave",
-    "vivaldi.exe":        "Vivaldi",
-    "steam.exe":          "Steam",
-    "steamwebhelper.exe": "Steam",
-    "cs2.exe":            "CS2",
-    "dota2.exe":          "Dota 2",
-    "discord.exe":        "Discord",
-    "telegram.exe":       "Telegram",
-    "code.exe":           "VS Code",
-    "pycharm64.exe":      "PyCharm",
-    "spotify.exe":        "Spotify",
-    "vlc.exe":            "VLC",
-    "explorer.exe":       "Рабочий стол",
-    "idea64.exe":         "IntelliJ IDEA",
-    "figma.exe":          "Figma",
-    "slack.exe":          "Slack",
-    "zoom.exe":           "Zoom",
-    "obs64.exe":          "OBS Studio",
-    "photoshop.exe":      "Photoshop",
-}
-
-BROWSER_PROCESSES = {
-    "chrome.exe", "firefox.exe", "msedge.exe",
-    "opera.exe", "brave.exe", "vivaldi.exe",
-}
-
-# Категории — версия пользователя, как в его собственном tracker.py
-CATEGORIES = {
-    # Браузеры
-    "Google Chrome": "browser",
-
-    # Общение
-    "Discord": "chat",
-    "Telegram": "chat",
-
-    # Работа
-    "VS Code": "work",
-    "Wps": "work",
-
-    # Музыка
-    "Яндекс музыка": "music",
-
-    # Игры
-    "Steam": "gaming",
-    "Xr_3da": "gaming",      # S.T.A.L.K.E.R.
-    "Isaac-ng": "gaming",
-    "Java": "tlauncher",
-    "Javaw": "tlauncher",
-
-    # Торренты
-    "Qbittorrent": "torrent",
-
-    # Фото
-    "Photos": "photo",
-
-    # VPN
-    "V2raytun": "vpn",
-
-    # Архиваторы
-    "7zfm": "archive",
-    "Winrar": "archive",
-
-    # Мои приложения
-    "Python3.12": "myapps",
-    "Python": "myapps",
-
-    "Searchapp": "Paneltask",
-}
-
-# Категории которые считаются медиа (не AFK даже без ввода)
-MEDIA_CATEGORIES = {"video", "music", "streaming"}
-
-# Ключевые слова в заголовке браузера = медиа
-MEDIA_TITLES = {
-    "youtube", "ютуб", "twitch", "netflix", "кинопоиск",
-    "okko", "иви", "premier", "vk видео", "vk video",
-    "rutube", "яндекс видео",
-}
+from core.app_maps import (
+    APP_NAMES, BROWSER_PROCESSES, CATEGORIES,
+    MEDIA_CATEGORIES, MEDIA_TITLES, clean_process_name,
+)
 
 AFK_TIMEOUT  = 300   # 5 минут без ввода → проверяем медиа
 AFK_HARD     = 1800  # 30 минут без ввода → AFK в любом случае

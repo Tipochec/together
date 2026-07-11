@@ -1,21 +1,23 @@
 """
-Автоматическое определение категории приложения через Gemini API.
+Автоматическое определение категории приложения через OpenRouter API.
 Используется только для неизвестных приложений — результат кешируется
 в JSON-файл, чтобы повторно не делать запросы.
+
+Раньше тут был Gemini, но он заблокирован в РФ на уровне IP без VPN —
+убрали его совсем, оставили только OpenRouter (не заблокирован).
 """
 import json
 import os
 import threading
+import time
 import urllib.request
 import urllib.error
 
-GEMINI_API_KEY = ""  # ← Вставь свой ключ сюда (или через settings.json)
-GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.5-flash-lite:generateContent?key="
-)
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+DEFAULT_MODEL  = "meta-llama/llama-3.1-8b-instruct:free"
 
 CACHE_PATH = os.path.join(os.path.dirname(__file__), "..", "ai_categories_cache.json")
+LOG_PATH   = os.path.join(os.path.dirname(__file__), "..", "ai_debug.log")
 
 VALID_CATEGORIES = [
     "gaming", "browser", "chat", "music", "video",
@@ -25,6 +27,18 @@ VALID_CATEGORIES = [
 
 _cache = None
 _cache_lock = threading.Lock()
+_log_lock = threading.Lock()
+
+
+def _log(msg):
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
+    print(line)
+    try:
+        with _log_lock:
+            with open(LOG_PATH, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+    except Exception:
+        pass
 
 
 def _load_cache():
@@ -47,19 +61,17 @@ def _save_cache():
         pass
 
 
-def get_api_key():
-    """Берём ключ из settings.json если он там есть, иначе из константы выше"""
+def _settings():
     try:
         from core.tracker import load_settings
-        s = load_settings()
-        return s.get("gemini_api_key", "") or GEMINI_API_KEY
+        return load_settings()
     except Exception:
-        return GEMINI_API_KEY
+        return {}
 
 
 def classify_app(process_name, window_title=""):
     """
-    Определяет категорию приложения по имени процесса.
+    Определяет категорию приложения по имени процесса через OpenRouter.
     Возвращает категорию из VALID_CATEGORIES, или "other" при ошибке.
     Результат кешируется по process_name — повторный вызов мгновенный.
     """
@@ -70,15 +82,17 @@ def classify_app(process_name, window_title=""):
         if key in cache:
             return cache[key]
 
-    api_key = get_api_key()
-    if not api_key:
-        # Без ключа — не можем спросить нейронку, считаем "other"
-        with _cache_lock:
-            cache[key] = "other"
-            _save_cache()
-        return "other"
+    s = _settings()
+    api_key = s.get("openrouter_api_key", "")
+    model = s.get("openrouter_model") or DEFAULT_MODEL
 
-    category = _ask_gemini(process_name, window_title, api_key)
+    if not api_key:
+        _log(f"NO_KEY process={process_name!r} — openrouter_api_key не задан в settings.json, категория=other")
+        category = "other"
+    else:
+        category = _ask_openrouter(process_name, window_title, api_key, model)
+        if category is None:
+            category = "other"
 
     with _cache_lock:
         cache[key] = category
@@ -87,50 +101,51 @@ def classify_app(process_name, window_title=""):
     return category
 
 
-def _ask_gemini(process_name, window_title, api_key):
+def _ask_openrouter(process_name, window_title, api_key, model):
     prompt = (
-        f"Процесс Windows: \"{process_name}\". "
-        f"Заголовок окна: \"{window_title}\". "
-        f"К какой категории относится эта программа? "
-        f"Варианты строго одним словом из списка: "
-        f"{', '.join(VALID_CATEGORIES)}. "
-        f"Ответь только одним словом без пояснений."
+        f"Процесс Windows: \"{process_name}\". Заголовок окна: \"{window_title}\". "
+        f"К какой категории относится эта программа? Варианты строго одним словом из списка: "
+        f"{', '.join(VALID_CATEGORIES)}. Ответь только одним словом без пояснений."
     )
-
     body = json.dumps({
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0, "maxOutputTokens": 10},
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 10,
+        "temperature": 0,
     }).encode("utf-8")
 
     req = urllib.request.Request(
-        GEMINI_URL + api_key,
+        OPENROUTER_URL,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
         method="POST",
     )
-
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            text = (
-                data.get("candidates", [{}])[0]
-                    .get("content", {})
-                    .get("parts", [{}])[0]
-                    .get("text", "")
-                    .strip()
-                    .lower()
-            )
-            # Берём только первое слово, на случай если модель добавила текст
+            text = data["choices"][0]["message"]["content"].strip().lower()
             text = text.split()[0].strip(".,!?") if text else ""
             if text in VALID_CATEGORIES:
                 return text
+            _log(f"OPENROUTER_UNEXPECTED process={process_name!r} raw_answer={text!r} → other")
             return "other"
+    except urllib.error.URLError as e:
+        _log(f"OPENROUTER_OFFLINE process={process_name!r} error={e}")
+        return None
     except urllib.error.HTTPError as e:
-        print(f"Gemini API error: {e.code}")
+        body_text = ""
+        try:
+            body_text = e.read().decode("utf-8")[:200]
+        except Exception:
+            pass
+        _log(f"OPENROUTER_HTTP_ERROR process={process_name!r} code={e.code} body={body_text!r}")
         return "other"
     except Exception as e:
-        print(f"Gemini classify error: {e}")
-        return "other"
+        _log(f"OPENROUTER_ERROR process={process_name!r} error={e}")
+        return None
 
 
 def classify_app_async(process_name, window_title, callback):

@@ -11,50 +11,11 @@ import ctypes.wintypes
 from datetime import datetime, date
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "..", "stats.db")
+SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "..", "settings.json")
 
-# Те же маппинги что в tracker.py
-APP_NAMES = {
-    "chrome.exe":         "Google Chrome",
-    "firefox.exe":        "Firefox",
-    "msedge.exe":         "Microsoft Edge",
-    "opera.exe":          "Opera",
-    "brave.exe":          "Brave",
-    "vivaldi.exe":        "Vivaldi",
-    "steam.exe":          "Steam",
-    "steamwebhelper.exe": "Steam",
-    "cs2.exe":            "CS2",
-    "dota2.exe":          "Dota 2",
-    "discord.exe":        "Discord",
-    "telegram.exe":       "Telegram",
-    "code.exe":           "VS Code",
-    "pycharm64.exe":      "PyCharm",
-    "spotify.exe":        "Spotify",
-    "vlc.exe":            "VLC",
-    "idea64.exe":         "IntelliJ IDEA",
-    "figma.exe":          "Figma",
-    "slack.exe":          "Slack",
-    "zoom.exe":           "Zoom",
-    "obs64.exe":          "OBS Studio",
-    "photoshop.exe":      "Photoshop",
-}
-
-CATEGORIES = {
-    "Google Chrome": "browser", "Firefox": "browser",
-    "Microsoft Edge": "browser", "Opera": "browser",
-    "Brave": "browser", "Vivaldi": "browser",
-    "Steam": "gaming", "CS2": "gaming", "Dota 2": "gaming",
-    "Xr_3da": "gaming", "Isaac-ng": "gaming",
-    "Java": "tlauncher", "Javaw": "tlauncher",
-    "Discord": "chat", "Telegram": "chat", "Slack": "chat", "Zoom": "chat",
-    "Spotify": "music", "VLC": "video", "Яндекс музыка": "music",
-    "VS Code": "work", "PyCharm": "work", "IntelliJ IDEA": "work",
-    "Figma": "work", "Photoshop": "work", "Wps": "work",
-    "OBS Studio": "streaming",
-    "Qbittorrent": "torrent",
-    "Photos": "photo",
-    "V2raytun": "vpn",
-    "7zfm": "archive", "Winrar": "archive",
-}
+# Общий источник — раньше здесь были свои копии словарей, которые
+# расходились с tracker.py. Теперь один источник правды в app_maps.py.
+from core.app_maps import APP_NAMES, CATEGORIES
 
 # Процессы которые не считаем (системные, фоновые, невидимые пользователю)
 IGNORE_PROCESSES = {
@@ -72,6 +33,23 @@ IGNORE_PROCESSES = {
     "wudfhost.exe", "registry.exe", "memcompression.exe",
     "ngentask.exe", "wmiprvse.exe", "taskmgr.exe", "pt2500csm.exe", "calculatorapp.exe", "nvidia overlay.exe",
 }
+
+
+def _extra_ignore_processes():
+    """
+    Пользователь может добавить свои процессы для игнора в settings.json:
+    "extra_ignore_processes": ["rvrvpnfui.exe", "someghost.exe"]
+    Так решается проблема разных авто-стартующих программ на разных ПК
+    (например RVRVPNFUI), не трогая код.
+    """
+    try:
+        import json
+        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+            s = json.load(f)
+        extra = s.get("extra_ignore_processes", [])
+        return {p.strip().lower() for p in extra if p.strip()}
+    except Exception:
+        return set()
 
 
 def get_db():
@@ -125,6 +103,7 @@ class StatsTracker:
         Использует EnumWindows чтобы получить все видимые окна.
         """
         found = {}  # app_name → category
+        ignore_extra = _extra_ignore_processes()
 
         user32  = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
@@ -135,9 +114,22 @@ class StatsTracker:
                 # Только видимые окна с заголовком
                 if not user32.IsWindowVisible(hwnd):
                     return True
+                # Свёрнутые (IsIconic) окна не считаем — например калькулятор,
+                # который "закрыли", но UWP-контейнер продолжает висеть свёрнутым
+                if user32.IsIconic(hwnd):
+                    return True
                 length = user32.GetWindowTextLengthW(hwnd)
                 if length == 0:
                     return True
+
+                # Окна-призраки: формально видимые, но с нулевым/точечным размером —
+                # реально пользователь их не видит и не взаимодействует с ними
+                rect = ctypes.wintypes.RECT()
+                if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                    w = rect.right - rect.left
+                    h = rect.bottom - rect.top
+                    if w <= 1 or h <= 1:
+                        return True
 
                 # Получаем PID
                 pid = ctypes.wintypes.DWORD()
@@ -153,7 +145,7 @@ class StatsTracker:
                 kernel32.CloseHandle(handle)
 
                 proc = os.path.basename(buf.value).lower() if buf.value else ""
-                if not proc or proc in IGNORE_PROCESSES:
+                if not proc or proc in IGNORE_PROCESSES or proc in ignore_extra:
                     return True
 
                 # Маппим на читаемое имя если знаем, иначе берём имя процесса как есть
@@ -207,16 +199,23 @@ class StatsTracker:
         user32   = ctypes.windll.user32
         kernel32 = ctypes.windll.kernel32
         psapi    = ctypes.windll.psapi
+        ignore_extra = _extra_ignore_processes()
 
         def enum_callback(hwnd, _):
             try:
                 visible = bool(user32.IsWindowVisible(hwnd))
+                iconic  = bool(user32.IsIconic(hwnd))
                 length  = user32.GetWindowTextLengthW(hwnd)
                 title   = ""
                 if length > 0:
                     buf = ctypes.create_unicode_buffer(length + 1)
                     user32.GetWindowTextW(hwnd, buf, length + 1)
                     title = buf.value
+
+                rect = ctypes.wintypes.RECT()
+                zero_size = False
+                if user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                    zero_size = (rect.right - rect.left) <= 1 or (rect.bottom - rect.top) <= 1
 
                 pid = ctypes.wintypes.DWORD()
                 user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
@@ -230,10 +229,20 @@ class StatsTracker:
                     proc = os.path.basename(buf2.value).lower() if buf2.value else "?"
 
                 if visible and length > 0:
-                    ignored = proc in IGNORE_PROCESSES
+                    reason = None
+                    if iconic:
+                        reason = "свёрнуто"
+                    elif zero_size:
+                        reason = "нулевой размер (окно-призрак)"
+                    elif proc in IGNORE_PROCESSES:
+                        reason = "в базовом списке игнора"
+                    elif proc in ignore_extra:
+                        reason = "в вашем extra_ignore_processes"
+
                     results.append({
                         "proc": proc, "title": title[:40],
-                        "ignored": ignored,
+                        "ignored": reason is not None,
+                        "reason": reason,
                     })
             except Exception:
                 pass

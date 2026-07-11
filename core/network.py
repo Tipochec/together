@@ -2,6 +2,7 @@
 Сетевой модуль - связь между двумя ПК через сокеты
 """
 import json, threading, time, socket, os
+from .chat import ChatManager
 from datetime import datetime
 
 PORT = 39721
@@ -23,21 +24,29 @@ def load_settings():
 class NetworkManager:
     def __init__(self, tracker):
         self.tracker = tracker
+        self.chat = ChatManager()
         self.partner_data = None
         self._lock = threading.Lock()
         self._on_partner_update = []
         self._on_status_change = []
+        self._on_message = []
         self._running = False
         self._connected = False
         self._client_socket = None
 
     def on_partner_update(self, cb): self._on_partner_update.append(cb)
     def on_status_change(self, cb):  self._on_status_change.append(cb)
+    
+    def on_message(self, cb):
+        self._on_message.append(cb)
 
     def get_partner_data(self):
         with self._lock:
             return dict(self.partner_data) if self.partner_data else None
 
+    def get_chat_history(self, limit=50):
+        return self.chat.get_messages(limit=limit)
+    
     def is_connected(self):
         return self._connected
 
@@ -144,7 +153,7 @@ class NetworkManager:
         history = self.tracker.get_history()[:10]
         return {
             "type": "activity",
-            "name": s.get("name", "Партнёр"),
+            "name": s.get("name") or "Партнёр",
             "app":  current.get("app", "—"),
             "title": current.get("title", ""),
             "category": current.get("category", "other"),
@@ -161,19 +170,76 @@ class NetworkManager:
                 for h in history
             ],
         }
+        
+    def send_message(self, text):
+        text = text.strip()
+
+        if not text:
+            return
+
+        settings = load_settings()
+
+        packet = {
+            "type": "message",
+            "sender": settings.get("name") or "Я",
+            "text": text[:1000],
+            "time": datetime.now().isoformat()
+        }
+
+        self.chat.add_message(
+            sender=packet["sender"],
+            text=packet["text"],
+            incoming=False
+        )
+
+        if self._client_socket:
+            try:
+                self._client_socket.sendall(
+                    (json.dumps(packet, ensure_ascii=False) + "\n").encode()
+                )
+            except Exception:
+                pass
 
     def _process(self, raw):
         try:
             data = json.loads(raw)
-            if data.get("type") == "activity":
-                with self._lock:
-                    self.partner_data = data
-                for cb in self._on_partner_update:
-                    try: cb(data)
-                    except Exception: pass
+
+            packet_type = data.get("type")
+
+            if packet_type == "activity":
+                self._process_activity(data)
+
+            elif packet_type == "message":
+                self._process_message(data)
+
         except Exception:
             pass
 
+
+    def _process_activity(self, data):
+        with self._lock:
+            self.partner_data = data
+
+        for cb in self._on_partner_update:
+            try:
+                cb(data)
+            except Exception:
+                pass
+
+
+    def _process_message(self, data):
+        self.chat.add_message(
+            sender=data.get("sender") or "Партнёр",
+            text=data.get("text", "")[:1000],
+            incoming=True
+        )
+
+        for cb in self._on_message:
+            try:
+                cb(data)
+            except Exception:
+                pass
+    
     def _set_connected(self, val):
         if self._connected != val:
             self._connected = val
