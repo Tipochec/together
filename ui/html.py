@@ -34,14 +34,13 @@ HTML = r"""
 
   <!-- АКТИВНОСТЬ -->
   <div id="page-main">
-    <div class="status-row">
+    <div class="status-row" style="justify-content:center">
       <div class="dot dot-waiting" id="conn-dot"></div>
       <span class="status-text" id="conn-text">ожидание партнёра...</span>
     </div>
-    <div id="conn-log" style="font-size:11px;color:rgba(255,255,255,0.35);
-      margin:-6px 0 10px 2px;display:flex;gap:8px;flex-wrap:wrap"></div>
     <div class="cards">
       <div class="card card-you" id="my-card">
+        <div class="online-since" id="my-online-since"></div>
         <div class="avatar avatar-you" id="my-avatar">Я</div>
         <div class="card-label" id="my-label">ты</div>
         <div class="card-app" id="my-app">загрузка...</div>
@@ -50,6 +49,7 @@ HTML = r"""
         <div class="badge badge-idle" id="my-badge">—</div>
       </div>
       <div class="card card-her offline-card" id="her-card">
+        <div class="online-since" id="her-online-since"></div>
         <div class="avatar avatar-her" id="her-avatar">?</div>
         <div class="card-label" id="her-label">она</div>
         <div class="card-app" id="her-app">не в сети</div>

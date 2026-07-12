@@ -41,6 +41,13 @@ CSS = r"""
   .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
   .dot-online{background:#1d9e75;box-shadow:0 0 6px #1d9e75}
   .dot-waiting{background:#b87c1a;box-shadow:0 0 6px #b87c1a}
+
+  .online-since{font-size:10px;margin-bottom:6px;display:flex;align-items:center;gap:5px}
+  .online-since .dot{width:6px;height:6px}
+  .online-since.is-online{color:#5ddaaa}
+  .online-since.is-online .dot{background:#1d9e75;box-shadow:0 0 5px #1d9e75}
+  .online-since.is-offline{color:#f0b352}
+  .online-since.is-offline .dot{background:#b87c1a;box-shadow:0 0 5px #b87c1a}
   .status-text{font-size:12px;color:rgba(255,255,255,0.3)}
   .history-cols{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px}
   .history-col-title{font-size:10px;color:rgba(255,255,255,0.2);text-transform:uppercase;

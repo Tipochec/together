@@ -69,6 +69,15 @@ class ChatManager:
         with self._connect() as conn:
             conn.execute("UPDATE messages SET is_read = 1")
             conn.commit()
-            
+
+    def clear_all(self):
+        """Удаляет ВСЮ локальную историю чата. У партнёра его копия не трогается —
+        у каждого своя независимая база, это осознанно (чат для мимолётных
+        сообщений, а не архив переписки)."""
+        with self._lock:
+            with self._connect() as conn:
+                conn.execute("DELETE FROM messages")
+                conn.commit()
+
     def get_last_messages(self, limit=50):
         return self.get_messages(limit)

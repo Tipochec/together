@@ -105,4 +105,55 @@ body{
     font-size:10px;
     opacity:.5;
 }
+
+.confirm-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.55);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:50;
+}
+
+.confirm-box{
+    width:calc(100% - 48px);
+    max-width:280px;
+    background:#1e1c26;
+    border:0.5px solid rgba(255,255,255,0.08);
+    border-radius:14px;
+    padding:16px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.4);
+}
+
+.confirm-text{
+    font-size:12.5px;
+    line-height:1.5;
+    color:rgba(255,255,255,0.8);
+    margin-bottom:14px;
+}
+
+.confirm-btns{
+    display:flex;
+    gap:8px;
+}
+
+.confirm-btn{
+    flex:1;
+    border:none;
+    border-radius:9px;
+    padding:8px 0;
+    font-size:12px;
+    cursor:pointer;
+}
+
+.confirm-cancel{
+    background:rgba(255,255,255,0.08);
+    color:rgba(255,255,255,0.6);
+}
+
+.confirm-ok{
+    background:#d4537e;
+    color:white;
+}
 """

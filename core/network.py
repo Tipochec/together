@@ -7,7 +7,11 @@ from datetime import datetime
 
 PORT = 39721
 RECONNECT_DELAY = 5
-OFFLINE_TIMEOUT = 15  # секунд без пакета от партнёра — считаем оффлайн
+OFFLINE_TIMEOUT = 15    # секунд без пакета от партнёра — "сырое" подозрение на оффлайн
+RECONNECT_GRACE = 30    # ещё столько секунд ждём подтверждения, прежде чем
+                         # считать партнёра ДЕЙСТВИТЕЛЬНО оффлайн (фильтр от
+                         # обычных сетевых морганий VPN — не создаём фантомные
+                         # "перезаходы" в статусе/логе из-за секундного обрыва)
 
 
 def _settings_path():
@@ -35,7 +39,10 @@ class NetworkManager:
         self._connected = False   # для колбэка on_status_change (эдж-детект)
         self._last_seen = 0       # timestamp последнего ЛЮБОГО пакета от партнёра
         self._client_socket = None
-        self._connection_log = []  # [{"online": bool, "time": "ЧЧ:ММ"}] — последние 20
+        self._session_start = None       # когда партнёр зашёл в сеть (timestamp)
+        self._last_offline_at = None     # когда партнёр последний раз вышел (timestamp)
+        self._last_session_minutes = 0   # сколько длилась предыдущая сессия онлайна
+        self._pending_offline_since = None  # с какого момента подозреваем обрыв (ещё не подтверждён)
 
     def on_partner_update(self, cb): self._on_partner_update.append(cb)
     def on_status_change(self, cb):  self._on_status_change.append(cb)
@@ -49,18 +56,20 @@ class NetworkManager:
 
     def get_chat_history(self, limit=50):
         return self.chat.get_messages(limit=limit)
+
+    def clear_chat_history(self):
+        self.chat.clear_all()
     
-    def is_connected(self):
-        # Раньше здесь возвращался флаг, который выставляла ТОЛЬКО клиентская
-        # часть соединения (self._run_client). Но у нас каждый ПК одновременно
-        # и сервер, и клиент — если по какой-то причине клиентское соединение
-        # моргало/переподключалось, а данные при этом реально шли через
-        # серверную сторону (входящее соединение от партнёра) — флаг всё
-        # равно показывал "оффлайн", хотя партнёр был на связи.
-        # Теперь смотрим по факту: было ли получено ЛЮБОЕ (activity/message)
-        # сообщение от партнёра за последние OFFLINE_TIMEOUT секунд —
-        # неважно через какую из двух ролей соединения оно пришло.
+    def _raw_alive(self):
+        """"Сырая" проверка — был ли пакет за последние OFFLINE_TIMEOUT секунд.
+        Может моргать сама по себе при коротких обрывах сети/VPN."""
         return (time.time() - self._last_seen) < OFFLINE_TIMEOUT
+
+    def is_connected(self):
+        # Стабильный, подтверждённый статус (см. _watch_connection) —
+        # именно он используется в интерфейсе, логе сессий и колбэках трея.
+        # Короткие обрывы связи (короче RECONNECT_GRACE) сюда не долетают.
+        return self._connected
 
     def start(self):
         self._running = True
@@ -69,27 +78,77 @@ class NetworkManager:
         threading.Thread(target=self._watch_connection, daemon=True).start()
 
     def _watch_connection(self):
-        # Раз в секунду проверяем, не поменялся ли статус "оба онлайн" —
-        # дёргаем колбэки (это нужно трею для 🟢/🔴 в меню) только когда
-        # состояние реально изменилось, а не на каждый тик
+        # Раз в секунду проверяем статус. Смена "оба онлайн" → "оффлайн"
+        # подтверждается не сразу — иначе секундное моргание VPN/сети
+        # создавало фантомные "перезаходы" в логе, хотя партнёр никуда
+        # не уходил. Обратно "в сеть" — наоборот, признаём мгновенно
+        # (тут ложных срабатываний не бывает: раз пакет пришёл — значит
+        # партнёр точно на связи).
         while self._running:
-            now = self.is_connected()
-            if now != self._connected:
-                self._connected = now
-                self._connection_log.append({
-                    "online": now,
-                    "time": datetime.now().strftime("%H:%M"),
-                })
-                self._connection_log = self._connection_log[-20:]
-                for cb in self._on_status_change:
-                    try:
-                        cb(now)
-                    except Exception:
-                        pass
+            raw = self._raw_alive()
+
+            if raw:
+                self._pending_offline_since = None
+                if not self._connected:
+                    self._connected = True
+                    self._session_start = time.time()
+                    for cb in self._on_status_change:
+                        try:
+                            cb(True)
+                        except Exception:
+                            pass
+
+            elif self._connected:
+                if self._pending_offline_since is None:
+                    self._pending_offline_since = time.time()
+                elif time.time() - self._pending_offline_since >= RECONNECT_GRACE:
+                    # Обрыв подтверждён — партнёр действительно ушёл
+                    self._connected = False
+                    self._pending_offline_since = None
+                    self._last_offline_at = time.time()
+                    if self._session_start:
+                        self._last_session_minutes = int(
+                            (self._last_offline_at - self._session_start) / 60
+                        )
+                    self._session_start = None
+                    for cb in self._on_status_change:
+                        try:
+                            cb(False)
+                        except Exception:
+                            pass
+
             time.sleep(1)
 
-    def get_connection_log(self):
-        return list(self._connection_log)
+    def get_partner_status(self):
+        """
+        Один текущий статус партнёра (а не список событий):
+        - онлайн → с какого времени (честно, из ЕЁ переданного online_since —
+          не из момента, когда МЫ заметили её пакеты, иначе наш собственный
+          перезапуск приложения сбрасывал бы её время входа)
+        - оффлайн → с какого времени + сколько длилась прошлая сессия
+        """
+        if self._connected:
+            since_str = "?"
+            with self._lock:
+                reported = (self.partner_data or {}).get("online_since")
+            if reported:
+                try:
+                    since_str = datetime.fromisoformat(reported).strftime("%H:%M")
+                except Exception:
+                    pass
+            if since_str == "?" and self._session_start:
+                # partner_data ещё не пришёл (только что подключились) —
+                # временно показываем локальную оценку, обновится на
+                # следующем тике, когда придёт её пакет
+                since_str = datetime.fromtimestamp(self._session_start).strftime("%H:%M")
+            return {"online": True, "since": since_str}
+        elif self._last_offline_at:
+            return {
+                "online": False,
+                "since": datetime.fromtimestamp(self._last_offline_at).strftime("%H:%M"),
+                "last_session_minutes": self._last_session_minutes,
+            }
+        return None  # ещё ни разу не было на связи с момента запуска
 
     def stop(self):
         self._running = False
@@ -192,6 +251,11 @@ class NetworkManager:
             "category": current.get("category", "other"),
             "afk":  current.get("afk", False),
             "since": current.get("since", datetime.now()).isoformat(),
+            # Моё СОБСТВЕННОЕ время запуска приложения — партнёр покажет
+            # у себя именно его как "в сети с", а не момент, когда ОН меня
+            # обнаружил (это чинит баг с ложным сбросом времени входа при
+            # перезапуске приложения на стороне того, кто СМОТРИТ статус)
+            "online_since": self.tracker.get_session_start().isoformat(),
             "history": [
                 {
                     "app":   h.get("app","—"),

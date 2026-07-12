@@ -52,6 +52,24 @@ async function sendMessage() {
     }
 }
 
+async function clearChat() {
+    document.getElementById("confirm-overlay").style.display = "flex";
+}
+
+function hideConfirm() {
+    document.getElementById("confirm-overlay").style.display = "none";
+}
+
+async function confirmClearChat() {
+    hideConfirm();
+    try {
+        await pywebview.api.clear_chat();
+        await loadChat();
+    } catch (e) {
+        console.error("clear_chat failed:", e);
+    }
+}
+
 window.addEventListener("pywebviewready", () => {
     loadChat();
     const input = document.getElementById("message");

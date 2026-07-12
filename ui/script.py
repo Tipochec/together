@@ -67,7 +67,7 @@ function showPage(name,btn){
   document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
   if(name==='settings') loadSettings();
-  if(name==='stats') loadStats('today');
+  if(name==='stats'){ loadStats('today'); loadTimeStats(); }
 }
 
 function timeSince(iso){
@@ -145,13 +145,27 @@ function updateStatus(c){
   document.getElementById('conn-text').textContent=c?'оба онлайн':'ожидание партнёра...';
 }
 
-function updateConnLog(log){
-  const el = document.getElementById('conn-log');
-  if(!log || !log.length){ el.innerHTML=''; return; }
-  // Последние 6 событий, самое новое справа
-  el.innerHTML = log.slice(-6).map(e =>
-    `<span>${e.online ? '🟢' : '🔴'} ${e.time}</span>`
-  ).join('<span style="opacity:.3">·</span>');
+function updatePartnerStatus(st){
+  const el = document.getElementById('her-online-since');
+  if(!st){ el.textContent=''; el.className='online-since'; return; }
+  if(st.online){
+    el.className = 'online-since is-online';
+    el.innerHTML = `<span class="dot"></span> в сети с ${st.since}`;
+  } else {
+    const mins = st.last_session_minutes || 0;
+    const dur = mins >= 60 ? `${Math.floor(mins/60)}ч ${mins%60}м` : `${mins}м`;
+    el.className = 'online-since is-offline';
+    el.innerHTML = mins > 0
+      ? `<span class="dot"></span> не в сети с ${st.since} (была ${dur})`
+      : `<span class="dot"></span> не в сети с ${st.since}`;
+  }
+}
+
+function updateMyOnlineSince(since){
+  const el = document.getElementById('my-online-since');
+  if(!el) return;
+  el.className = 'online-since is-online';
+  el.innerHTML = since ? `<span class="dot"></span> в сети с ${since}` : '';
 }
 
 function loadSettings(){
@@ -274,7 +288,10 @@ function tick(){
   pywebview.api.get_state().then(s=>{
     if(s.my) updateCard('my',s.my,true);
     updateStatus(s.connected);
-    updateConnLog(s.connection_log);
+    updatePartnerStatus(s.partner_status);
+    updateMyOnlineSince(s.my_online_since);
+    const statsPage = document.getElementById('page-stats');
+    if(statsPage && statsPage.style.display === 'block') loadTimeStats();
     // Раньше тут проверялось только "есть ли вообще когда-либо полученные
     // данные о партнёре" (s.partner) — из-за этого карточка навсегда
     // застревала на последнем известном приложении/вкладке даже после

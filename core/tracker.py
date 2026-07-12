@@ -87,6 +87,9 @@ class ActivityTracker:
                 "session_start": self._session_start.isoformat(),
             }
 
+    def get_session_start(self):
+        return self._session_start
+
     def start(self):
         self._running  = True
         prev_app   = None

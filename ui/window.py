@@ -62,7 +62,8 @@ class WindowAPI:
             "my_history":  fmt(history, "you"),
             "partner":     partner,
             "connected":   connected,
-            "connection_log": _network.get_connection_log() if _network else [],
+            "my_online_since": _tracker.get_session_start().strftime("%H:%M") if _tracker else "—",
+            "partner_status": _network.get_partner_status() if _network else None,
             "time_stats":  _tracker.get_time_stats(),
         }
 
@@ -94,6 +95,11 @@ class WindowAPI:
         except Exception as e:
             print("save_settings error:", e)
         return True
+
+    def get_time_stats(self):
+        if not _tracker:
+            return {"active": 0, "watching": 0, "afk": 0, "total": 0}
+        return _tracker.get_time_stats()
 
     def get_stats(self, period):
         from core.stats import fmt_time
@@ -151,9 +157,28 @@ class WindowAPI:
             _chat_window = None
 
     def get_chat_history(self):
-        return _network.get_chat_history() if _network else []
+        if not _network:
+            return []
+        history = _network.get_chat_history()
 
+        # Тот же баг, что был на карточке партнёра — sender у входящих
+        # сообщений это имя, которое партнёр указал СЕБЕ в настройках
+        # (пришло по сети), а не локальное поле "Имя партнёра". Применяем
+        # тот же override и здесь.
+        from core.tracker import load_settings
+        s = load_settings()
+        partner_name = s.get("partner_name")
+        if partner_name:
+            for msg in history:
+                if msg.get("incoming"):
+                    msg["sender"] = partner_name
 
+        return history
+
+    def clear_chat(self):
+        if _network:
+            _network.clear_chat_history()
+        return True
 
     def refresh_chat(self):
         if _chat_window:

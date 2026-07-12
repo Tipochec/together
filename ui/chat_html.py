@@ -20,6 +20,10 @@ HTML = r"""
 💬 Чат
 </div>
 
+<button class="close" onclick="clearChat()" title="Очистить историю (только у себя)" style="margin-right:4px">
+🗑
+</button>
+
 <button class="close" onclick="pywebview.api.close_chat()">
 ✕
 </button>
@@ -44,6 +48,16 @@ onclick="sendMessage()">
 
 </button>
 
+</div>
+
+<div id="confirm-overlay" class="confirm-overlay" style="display:none">
+  <div class="confirm-box">
+    <div class="confirm-text">Очистить историю чата у себя?<br>Партнёра переписка не тронется.</div>
+    <div class="confirm-btns">
+      <button class="confirm-btn confirm-cancel" onclick="hideConfirm()">Отмена</button>
+      <button class="confirm-btn confirm-ok" onclick="confirmClearChat()">Очистить</button>
+    </div>
+  </div>
 </div>
 
 <script>
