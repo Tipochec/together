@@ -4,6 +4,7 @@
   "ip": "",
   "private_mode": false,
   "openrouter_api_key": "",
-  "openrouter_model": "meta-llama/llama-3.1-8b-instruct:free",
-  "extra_ignore_processes": []
+  "openrouter_model": "openrouter/free",
+  "extra_ignore_processes": [],
+  "custom_sound_path": ""
 }

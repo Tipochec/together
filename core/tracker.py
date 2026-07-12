@@ -31,7 +31,20 @@ def load_settings():
     try:
         with open(_settings_path(), "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        # Битый JSON (например неэкранированный \ в пути) раньше молча
+        # обнулял ВСЕ настройки без единого следа — теперь хотя бы видно
+        # в логе, что settings.json невалиден и почему
+        try:
+            log_path = os.path.join(os.path.dirname(_settings_path()), "ai_debug.log")
+            with open(log_path, "a", encoding="utf-8") as lf:
+                import time
+                lf.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] "
+                         f"SETTINGS_JSON_BROKEN error={e} — все настройки временно сброшены на дефолт!\n")
+        except Exception:
+            pass
         return {}
 
 

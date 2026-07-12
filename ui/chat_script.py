@@ -18,6 +18,7 @@ async function loadChat() {
         const time = new Date(msg.time);
 
         div.innerHTML = `
+            ${msg.incoming ? `<div class="sender">${msg.sender || "Партнёр"}</div>` : ""}
             <div>${msg.text}</div>
             <div class="time">
                 ${time.toLocaleTimeString([], {

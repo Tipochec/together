@@ -1,36 +1,58 @@
 """
-Windows toast-уведомления — используются ТОЛЬКО когда главное окно
-приложения свёрнуто или спрятано в трей (то есть красивый toast внутри
-интерфейса физически некому показать, юзер его не увидит).
+Звуковое уведомление о новом сообщении в чате.
 
-Если winotify не установлен или отправка не удалась — тихо ничего не
-делаем, приложение не должно падать из-за уведомлений.
+Раньше тут был системный Windows toast (через winotify) — убрали, потому
+что Windows toast штука капризная (фокус-ассистент, антивирус, политики
+уведомлений для непроверенных приложений — мог просто не показываться
+без объяснения причин, без ошибок в коде). Плюс визуально это "засоряло"
+интерфейс.
+
+winsound — встроенный модуль Python на Windows, ничего доустанавливать
+не нужно. Поддерживается свой .wav файл через settings.json
+("custom_sound_path") — если файла нет/не указан — играет системный звук.
 """
 import os
 
 try:
-    from winotify import Notification
+    import winsound
     _AVAILABLE = True
 except ImportError:
+    # Не-Windows система (например при разработке/тестах) — просто молчим
     _AVAILABLE = False
 
-_ICON_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "icon.ico")
+
+def _settings():
+    try:
+        from core.tracker import load_settings
+        return load_settings()
+    except Exception:
+        return {}
 
 
-def notify_chat_message(sender, text):
-    """Показывает системный toast о новом сообщении в чате."""
+def play_chat_sound():
+    """Проигрывает звук уведомления. Не блокирует поток (SND_ASYNC)."""
     if not _AVAILABLE:
         return
+
+    custom_path = _settings().get("custom_sound_path", "").strip()
+    if custom_path and custom_path.lower().endswith(".wav"):
+        if not os.path.isabs(custom_path):
+            project_root = os.path.join(os.path.dirname(__file__), "..")
+            custom_path = os.path.join(project_root, custom_path)
+        if os.path.isfile(custom_path):
+            try:
+                winsound.PlaySound(custom_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                return
+            except Exception:
+                pass  # если свой файл не проигрался — падаем на системный звук ниже
+
     try:
-        preview = (text or "")[:120]
-        toast = Notification(
-            app_id="Together",
-            title=f"💬 {sender}",
-            msg=preview,
-            icon=_ICON_PATH if os.path.exists(_ICON_PATH) else "",
+        # SystemAsterisk — стандартный "динь" звук уведомления Windows,
+        # настраивается пользователем в Панели управления → Звуки
+        winsound.PlaySound(
+            "SystemAsterisk",
+            winsound.SND_ALIAS | winsound.SND_ASYNC | winsound.SND_NODEFAULT,
         )
-        toast.show()
     except Exception:
-        # Уведомления — не критичная функция, ошибка тут не должна
-        # ронять поток сети/трекера
+        # Уведомления не критичны — не должны ронять поток сети
         pass

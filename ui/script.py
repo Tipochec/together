@@ -152,6 +152,7 @@ function loadSettings(){
     document.getElementById('inp-ip').value=s.ip||'';
     document.getElementById('inp-openrouter-key').value=s.openrouter_api_key||'';
     document.getElementById('inp-extra-ignore').value=(s.extra_ignore_processes||[]).join(', ');
+    document.getElementById('inp-custom-sound').value=s.custom_sound_path||'';
     document.getElementById('my-ip').textContent=s.my_ip||'—';
     document.getElementById('btn-autostart').textContent=s.autostart?'включён ✓':'выключен';
     document.getElementById('tog-private').checked=s.private_mode||false;
@@ -167,6 +168,7 @@ function saveSettings(){
     ip:document.getElementById('inp-ip').value,
     openrouter_api_key:document.getElementById('inp-openrouter-key').value,
     extra_ignore_processes:extraIgnore,
+    custom_sound_path:document.getElementById('inp-custom-sound').value,
   }).then(()=>{
     const b=document.getElementById('btn-save');
     b.textContent='Сохранено ✓';
@@ -273,31 +275,5 @@ function tick(){
 }
 
 window.addEventListener('pywebviewready',()=>{ tick(); setInterval(tick,1500); });
-
-// Маленький красивый toast для входящего сообщения чата (вместо системного уведомления)
-function showChatToast(sender, text){
-  let host = document.getElementById('toast-host');
-  if(!host){
-    host = document.createElement('div');
-    host.id = 'toast-host';
-    host.style.cssText = 'position:fixed;top:44px;right:10px;z-index:9999;display:flex;flex-direction:column;gap:6px;pointer-events:none;';
-    document.body.appendChild(host);
-  }
-  const t = document.createElement('div');
-  t.className = 'chat-toast';
-  t.style.cssText = 'pointer-events:auto;max-width:230px;background:rgba(28,26,38,0.96);'
-    + 'border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:10px 12px;'
-    + 'box-shadow:0 6px 20px rgba(0,0,0,0.35);cursor:pointer;'
-    + 'opacity:0;transform:translateX(16px);transition:opacity .25s ease,transform .25s ease;';
-  t.innerHTML = '<div style="font-size:12px;color:#a89ef0;margin-bottom:2px">💬 ' + sender + '</div>'
-    + '<div style="font-size:13px;color:rgba(255,255,255,0.85);word-break:break-word">' + (text||'').slice(0,120) + '</div>';
-  t.onclick = () => { pywebview.api.open_chat(); t.remove(); };
-  host.appendChild(t);
-  requestAnimationFrame(()=>{ t.style.opacity='1'; t.style.transform='translateX(0)'; });
-  setTimeout(()=>{
-    t.style.opacity='0'; t.style.transform='translateX(16px)';
-    setTimeout(()=>t.remove(), 250);
-  }, 4500);
-}
 
 """

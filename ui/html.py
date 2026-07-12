@@ -116,6 +116,13 @@ HTML = r"""
     </div>
     <div class="settings-row">
       <span class="settings-label">
+        🔔 Свой звук уведомления
+        <div style="font-size:10px;color:rgba(255,255,255,0.25);margin-top:2px">полный путь к .wav файлу, пусто = стандартный звук Windows</div>
+      </span>
+      <input class="si" id="inp-custom-sound" placeholder="C:\Users\...\notify.wav"/>
+    </div>
+    <div class="settings-row">
+      <span class="settings-label">
         🕵️ Приватный режим
         <div style="font-size:10px;color:rgba(255,255,255,0.25);margin-top:2px">скрывает вкладку браузера</div>
       </span>

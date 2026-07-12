@@ -19,7 +19,7 @@ _network = None
 _window  = None
 _stats   = None
 _chat_window = None
-_window_visible = False  # окно создаётся hidden=True, см. run_webview_loop
+_quitting = False  # True только когда реально выходим из приложения (трей → Закрыть)
 
 
 class WindowAPI:
@@ -119,14 +119,10 @@ class WindowAPI:
             return f"ошибка чтения лога: {e}"
 
     def hide_window(self):
-        global _window_visible
-        _window_visible = False
         if _window:
             _window.hide()
 
     def minimize_window(self):
-        global _window_visible
-        _window_visible = False
         if _window:
             _window.minimize()
 
@@ -163,6 +159,8 @@ class WindowAPI:
         return not enabled
 
 def _do_quit():
+    global _quitting
+    _quitting = True
     _tracker.stop()
     if _network:
         _network.stop()
@@ -175,13 +173,21 @@ def _do_quit():
 
 
 def open_window():
-    global _window_visible
-    _window_visible = True
     if _window:
         _window.show()
         
 def open_chat_window():
     global _chat_window
+
+    # Окно чата уже открыто — просто показываем и выходим,
+    # НЕ создаём второе (раньше тут плодились дубли-окна, и закрыть
+    # можно было только последнее созданное — старые становились "сиротами")
+    if _chat_window:
+        try:
+            _chat_window.show()
+            return
+        except Exception:
+            _chat_window = None  # окно было уничтожено снаружи — создадим заново
 
     _chat_window = webview.create_window(
         title="Together • Чат",
@@ -193,22 +199,6 @@ def open_chat_window():
         frameless=True,
         easy_drag=True,
         background_color="#0f0f13",
-    )
-
-    if _chat_window:
-        try:
-            _chat_window.show()
-            return
-        except Exception:
-            pass
-
-    _chat_window = webview.create_window(
-        "Чат",
-        html=CHAT_HTML,
-        width=420,
-        height=620,
-        resizable=False,
-        frameless=False,
     )
 
     def on_closed():
@@ -243,9 +233,6 @@ def run_webview_loop(tracker, network, stats=None):
     )
 
     def _on_incoming_message(data):
-        sender = data.get("sender", "Партнёр")
-        text   = data.get("text", "")
-
         # Если открыто окно чата — перерисовываем список сообщений
         if _chat_window:
             try:
@@ -253,35 +240,59 @@ def run_webview_loop(tracker, network, stats=None):
             except Exception:
                 pass
 
-        if _window_visible:
-            # Главное окно на экране — красивый toast внутри интерфейса
-            if _window:
-                try:
-                    sender_js = json.dumps(sender)
-                    text_js   = json.dumps(text)
-                    _window.evaluate_js(f"showChatToast({sender_js}, {text_js})")
-                except Exception:
-                    pass
-        else:
-            # Окно свёрнуто/в трее — показывать внутри интерфейса некому,
-            # используем настоящее системное Windows-уведомление
-            from core.notifications import notify_chat_message
-            notify_chat_message(sender, text)
+        # Звуковое уведомление — без визуального попапа, не засоряет интерфейс
+        from core.notifications import play_chat_sound
+        play_chat_sound()
+
+        # Мигание иконки в таскбаре, если окно сейчас не в фокусе —
+        # аналог того, как это делают Discord/Telegram
+        _flash_taskbar_if_unfocused()
 
     network.on_message(_on_incoming_message)
 
-    def hide_from_taskbar():
-        import ctypes
-        hwnd = ctypes.windll.user32.FindWindowW(None, "Together")
-        if hwnd:
-            GWL_EXSTYLE     = -20
-            WS_EX_TOOLWINDOW = 0x00000080
-            WS_EX_APPWINDOW  = 0x00040000
-            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
-            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
+    def _flash_taskbar_if_unfocused():
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            hwnd = user32.FindWindowW(None, "Together")
+            if not hwnd:
+                return
+            if user32.GetForegroundWindow() == hwnd:
+                return  # окно и так в фокусе — мигать незачем
 
-    threading.Timer(1.5, hide_from_taskbar).start()
+            class FLASHWINFO(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", ctypes.c_uint),
+                    ("hwnd", ctypes.c_void_p),
+                    ("dwFlags", ctypes.c_uint),
+                    ("uCount", ctypes.c_uint),
+                    ("dwTimeout", ctypes.c_uint),
+                ]
+
+            FLASHW_TRAY = 0x00000002
+            FLASHW_TIMERNOFG = 0x0000000C  # мигать пока пользователь не откроет окно
+
+            info = FLASHWINFO(
+                ctypes.sizeof(FLASHWINFO), hwnd,
+                FLASHW_TRAY | FLASHW_TIMERNOFG, 0, 0,
+            )
+            user32.FlashWindowEx(ctypes.byref(info))
+        except Exception:
+            pass
+
+    def _on_main_closing():
+        # Если это настоящий выход (трей → "Закрыть") — не мешаем,
+        # даём окну закрыться по-настоящему, иначе процесс зависнет
+        # навсегда (webview.start() никогда не вернёт управление)
+        if _quitting:
+            return True
+
+        # А это — случайное системное закрытие (превью в таскбаре,
+        # Alt+F4 и т.д.) — вот тут прячем в трей вместо закрытия
+        threading.Timer(0.05, lambda: _window and _window.hide()).start()
+        return False
+
+    _window.events.closing += _on_main_closing
 
     webview.start(debug=False)
     os._exit(0)

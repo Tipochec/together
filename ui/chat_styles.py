@@ -83,6 +83,13 @@ body{
     font-size:13px;
 }
 
+.sender{
+    font-size:11px;
+    font-weight:600;
+    margin-bottom:3px;
+    color:#a89ef0;
+}
+
 .message.me{
     margin-left:auto;
     background:#534ab7;
