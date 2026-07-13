@@ -39,6 +39,9 @@ class NetworkManager:
         self._connected = False   # для колбэка on_status_change (эдж-детект)
         self._last_seen = 0       # timestamp последнего ЛЮБОГО пакета от партнёра
         self._client_socket = None
+        self._send_lock = threading.Lock()  # защита от одновременной записи в
+                                             # сокет из _send_loop (heartbeat раз в
+                                             # 2 сек) и send_message() параллельно
         self._session_start = None       # когда партнёр зашёл в сеть (timestamp)
         self._last_offline_at = None     # когда партнёр последний раз вышел (timestamp)
         self._last_session_minutes = 0   # сколько длилась предыдущая сессия онлайна
@@ -152,9 +155,42 @@ class NetworkManager:
 
     def stop(self):
         self._running = False
-        if self._client_socket:
-            try: self._client_socket.close()
-            except Exception: pass
+        self._close_client_socket()
+
+    def _close_client_socket(self, sock_hint=None):
+        """
+        Единая точка закрытия исходящего клиентского сокета.
+
+        sock_hint — если передан, закрываем только если это ТОТ ЖЕ объект,
+        что сейчас лежит в self._client_socket. Нужно, чтобы поток с устаревшей
+        ссылкой на старый сокет (например упавший _send_loop, который уже
+        какое-то время как заблокирован в sendall) не мог случайно прибить
+        новый сокет, который _run_client успел переоткрыть за это время.
+
+        Раньше закрытие/обнуление self._client_socket происходило только в
+        finally-блоке _run_client — но управление попадало туда лишь когда
+        _recv_loop() реально завершался с исключением. При «тихом» обрыве
+        связи (сеть/VPN моргнули без честного FIN/RST) recv() просто уходит
+        в бесконечные таймауты и continue, соединение годами считалось
+        живым — из-за этого send_message() слал в мёртвый сокет и подвисал
+        на socket-таймауте (10-20 сек), а сам сокет так и оставался
+        «рабочим» для всех последующих сообщений вплоть до перезапуска
+        приложения. Теперь любой, кто первым обнаружит обрыв (heartbeat в
+        _send_loop ИЛИ отправка сообщения), сразу закрывает и обнуляет
+        сокет — следующая попытка отправки уже не виснет, а корректно
+        считает, что связи нет, и _run_client переподключается по таймеру.
+        """
+        with self._send_lock:
+            sock = self._client_socket
+            if sock is None:
+                return
+            if sock_hint is not None and sock is not sock_hint:
+                return
+            self._client_socket = None
+        try:
+            sock.close()
+        except Exception:
+            pass
 
     def update_settings(self, **kwargs):
         pass  # Настройки читаются из файла динамически
@@ -194,6 +230,7 @@ class NetworkManager:
             if not ip:
                 time.sleep(5)
                 continue
+            sock = None
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(5.0)
@@ -206,19 +243,48 @@ class NetworkManager:
             except Exception:
                 pass
             finally:
-                if self._client_socket:
-                    try: self._client_socket.close()
-                    except Exception: pass
-                    self._client_socket = None
+                if sock is not None:
+                    self._close_client_socket(sock_hint=sock)
             time.sleep(RECONNECT_DELAY)
 
     # ── Общение ───────────────────────────────────────────────
+    def _send_raw(self, sock, payload_dict):
+        """
+        Единая точка записи в исходящий клиентский сокет — используется и
+        heartbeat'ом (_send_loop, раз в 2 сек), и отправкой сообщений
+        (send_message). Лок нужен, чтобы два потока не писали в один сокет
+        одновременно: sendall() не атомарен, и при параллельном вызове из
+        двух потоков строки JSON двух разных пакетов теоретически могут
+        перемежаться в байтовом потоке и сломать построчный парсинг на
+        стороне партнёра (_recv_loop бьёт буфер по "\\n").
+
+        При любой ошибке сразу закрываем и обнуляем self._client_socket
+        через _close_client_socket() — раньше это делалось только в
+        finally _run_client, а туда управление попадало лишь после того,
+        как _recv_loop() падал с исключением. При "тихом" обрыве связи
+        (VPN моргнул без честного FIN/RST) recv() просто уходил в вечные
+        таймауты и не падал — сокет годами считался рабочим, и КАЖДАЯ
+        следующая попытка отправки сообщения заново повисала на
+        socket-таймауте (10-20 сек), пока не перезапустишь приложение.
+        Теперь первая же неудачная запись сразу помечает соединение
+        мёртвым — все последующие вызовы видят self._client_socket=None
+        и не пытаются писать в него, а _run_client переподключается сам
+        по таймеру (RECONNECT_DELAY).
+        """
+        try:
+            with self._send_lock:
+                sock.sendall(
+                    (json.dumps(payload_dict, ensure_ascii=False) + "\n").encode()
+                )
+            return True
+        except Exception:
+            self._close_client_socket(sock_hint=sock)
+            return False
+
     def _send_loop(self, sock):
         while self._running:
-            try:
-                payload = self._build_payload()
-                sock.sendall((json.dumps(payload, ensure_ascii=False) + "\n").encode())
-            except Exception:
+            payload = self._build_payload()
+            if not self._send_raw(sock, payload):
                 break
             time.sleep(2)
 
@@ -285,19 +351,28 @@ class NetworkManager:
             "time": datetime.now().isoformat()
         }
 
+        # Сохраняем локально сразу — мгновенный отклик в UI, независимо от
+        # состояния сети (у каждого своя локальная копия истории чата).
         self.chat.add_message(
             sender=packet["sender"],
             text=packet["text"],
             incoming=False
         )
 
-        if self._client_socket:
-            try:
-                self._client_socket.sendall(
-                    (json.dumps(packet, ensure_ascii=False) + "\n").encode()
-                )
-            except Exception:
-                pass
+        # Реальная отправка по сети — в отдельном потоке, не в потоке
+        # вызова. WindowAPI.send_message() дёргается СИНХРОННО из JS-моста
+        # pywebview (см. ui/window.py), поэтому раньше блокирующий sendall()
+        # на подвисшем сокете морозил всё окно на 10-20 сек. Теперь UI
+        # отпускается сразу; результат отправки на него не влияет — при
+        # неудаче _send_raw() сам закроет мёртвый сокет (см. его докстринг),
+        # и следующее сообщение уже не наступит на те же грабли.
+        sock = self._client_socket
+        if sock:
+            threading.Thread(
+                target=self._send_raw, args=(sock, packet), daemon=True
+            ).start()
+        # else: партнёр сейчас не на связи — сообщение осталось только
+        # локально, это ожидаемо (видно по статусу подключения в трее/окне).
 
     def _process(self, raw):
         try:
