@@ -18,6 +18,7 @@ HEALTH_LOG_INTERVAL = 300  # раз в 5 минут пишем в лог "всё
 
 _log_lock = threading.Lock()
 _last_throttled = {}
+_throttle_counts = {}   # key -> сколько раз событие было подавлено с последнего вывода
 _throttle_lock = threading.Lock()
 
 
@@ -40,13 +41,23 @@ def _log_throttled(key, msg, min_interval=60):
     и того же key. Нужно для событий, которые могут повторяться очень часто
     подряд (например: сеть/VPN легли на час — без троттлинга попытки
     переподключения раз в RECONNECT_DELAY=5 сек залили бы лог тысячами
-    одинаковых строк за это время)."""
+    одинаковых строк за это время).
+
+    Подавленные повторы не пропадают молча — их количество копится и
+    дописывается к следующей прошедшей строке ("повторилось ещё N раз"),
+    иначе по логу выглядело бы так, будто проблема случилась один раз,
+    хотя на деле была целая серия обрывов подряд — это сбивало с толку
+    при разборе реального инцидента."""
     now = time.time()
     with _throttle_lock:
         last = _last_throttled.get(key, 0)
         if now - last < min_interval:
+            _throttle_counts[key] = _throttle_counts.get(key, 0) + 1
             return
+        repeated = _throttle_counts.pop(key, 0)
         _last_throttled[key] = now
+    if repeated:
+        msg = f"{msg} [повторилось ещё {repeated} раз за последнюю минуту]"
     _log(msg)
 
 
@@ -431,18 +442,39 @@ class NetworkManager:
             time.sleep(2)
 
     def _recv_loop(self, conn, label="conn"):
-        buf = ""
+        # ВАЖНО: буфер держим в БАЙТАХ и декодируем в UTF-8 только уже
+        # полностью собранную строку (после разделителя \n), а не сырой
+        # кусок из recv() как есть. TCP режет поток на пакеты произвольно,
+        # не заботясь о границах символов — если recv(4096) обрывается
+        # ровно посередине многобайтового символа (а кириллица в JSON
+        # почти в каждом пакете), decode() всего чанка целиком падает с
+        # UnicodeDecodeError. Раньше это ловилось общим except как "обрыв
+        # связи" и рвало абсолютно рабочее соединение на пустом месте —
+        # разделитель \n (0x0A) физически не может встретиться внутри
+        # многобайтовой UTF-8 последовательности, так что резать по нему
+        # в байтах всегда безопасно, а декодировать нужно только то, что
+        # уже точно целая строка целиком.
+        buf = b""
         while self._running:
             try:
-                chunk = conn.recv(4096).decode("utf-8")
+                chunk = conn.recv(4096)
                 if not chunk:
                     _log(f"{label}: партнёр закрыл соединение штатно (пустой пакет)")
                     break
                 buf += chunk
-                while "\n" in buf:
-                    line, buf = buf.split("\n", 1)
-                    if line.strip():
-                        self._process(line.strip())
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    if not line.strip():
+                        continue
+                    try:
+                        text = line.decode("utf-8")
+                    except UnicodeDecodeError as e:
+                        _log_throttled(
+                            f"decode_error:{label}",
+                            f"{label}: не удалось декодировать строку ({type(e).__name__}: {e}) — пропускаю пакет"
+                        )
+                        continue
+                    self._process(text.strip())
             except socket.timeout:
                 continue
             except Exception as e:
