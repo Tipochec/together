@@ -26,6 +26,48 @@ def load_settings():
         return {}
 
 
+def _enable_keepalive(sock, idle=5, interval=3, count=3):
+    """Включает агрессивный TCP keepalive на сокете.
+
+    Без этого "тихий" обрыв связи (VPN/сеть моргнули без честного FIN/RST —
+    типичная история для ZeroTier/RadminVPN при смене сети, сне ноутбука,
+    NAT-таймауте) остаётся незамеченным ОС очень долго: sendall() в
+    полу-мёртвый сокет может отрабатывать без ошибки (данные просто уходят
+    в никуда), пока ядро само не решит, что пора считать соединение
+    мёртвым — а это может занять много МИНУТ, а не секунд. Из-за этого
+    и был баг "чат перестаёт доходить в одну сторону, но через какое-то
+    время сам оживает" — второй эффект как раз и есть момент, когда ОС
+    наконец обнаруживает обрыв, heartbeat/_send_raw() ловит ошибку,
+    закрывает мёртвый сокет, а _run_client переподключается.
+
+    С keepalive ОС сама шлёт зондирующие пакеты и обнаруживает обрыв за
+    ~idle + interval*count секунд (тут ~14 сек — совпадает по порядку
+    величины с уже существующим OFFLINE_TIMEOUT).
+    """
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except Exception:
+        pass
+    try:
+        if hasattr(socket, "TCP_KEEPIDLE"):
+            # Linux
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, idle)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, interval)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, count)
+        elif hasattr(socket, "TCP_KEEPALIVE"):
+            # macOS
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPALIVE, idle)
+        elif hasattr(socket, "SIO_KEEPALIVE_VALS"):
+            # Windows — основная целевая платформа этого приложения
+            # (значения в миллисекундах: время простоя, интервал зондов)
+            sock.ioctl(
+                socket.SIO_KEEPALIVE_VALS,
+                (1, idle * 1000, interval * 1000)
+            )
+    except Exception:
+        pass
+
+
 class NetworkManager:
     def __init__(self, tracker):
         self.tracker = tracker
@@ -217,6 +259,7 @@ class NetworkManager:
                 time.sleep(3)
 
     def _handle_conn(self, conn):
+        _enable_keepalive(conn)
         conn.settimeout(10.0)
         send_t = threading.Thread(target=self._send_loop, args=(conn,), daemon=True)
         send_t.start()
@@ -235,6 +278,7 @@ class NetworkManager:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(5.0)
                 sock.connect((ip, PORT))
+                _enable_keepalive(sock)
                 sock.settimeout(10.0)
                 self._client_socket = sock
                 send_t = threading.Thread(target=self._send_loop, args=(sock,), daemon=True)
